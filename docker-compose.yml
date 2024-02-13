@@ -30,6 +30,7 @@ services:
       - EMAIL_SMTP_ALLOW_INVALID_CERT=${EMAIL_SMTP_ALLOW_INVALID_CERT}
       - EMAIL_SMTP_SENDER_NAME=${EMAIL_SMTP_SENDER_NAME}
       - EMAIL_SMTP_SENDER_EMAIL=${EMAIL_SMTP_SENDER_EMAIL}
+      - EXTERNAL_AUTH_URL=${EXTERNAL_AUTH_URL}
       - ALLOW_MULTIPLE_ORGS=${ALLOW_MULTIPLE_ORGS:-false}
       - LIGHTDASH_QUERY_MAX_LIMIT=${LIGHTDASH_QUERY_MAX_LIMIT}
       - LIGHTDASH_MAX_PAYLOAD=${LIGHTDASH_MAX_PAYLOAD:-5mb}
@@ -39,6 +40,12 @@ services:
       - SCHEDULER_ENABLED=true
     volumes:
       - "${DBT_PROJECT_DIR}:/usr/app/dbt"
+      # - ./.env:/usr/app/dbt/.env
+      # - ./.env.development:/usr/app/dbt/.env.development
+      # - ./.env.fast-install:/usr/app/dbt/.env.fast-install
+      # - ./docker-compose.yml:/usr/app/dbt/docker-compose.yml
+      # - ./scripts/install.sh:/usr/app/dbt/scripts/install.sh
+      # - ./lightdash.yml:/usr/app/dbt/lightdash.yml
     ports:
       - ${PORT:-8080}:${PORT:-8080}
 

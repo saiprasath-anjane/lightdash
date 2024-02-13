@@ -156,7 +156,7 @@ track_error() {
 }
 
 track_support() {
-  echo -e "\n📨 🙏 Sorry that you had an issue with the installation. Please head to our Slack community and post your issue in #help 🙋 \n https://join.slack.com/t/lightdash-community/shared_invite/zt-16q953ork-NZr1qdEqxSwB17E2ckUe7A \n Someone from Lightdash will help you out (usually the same day)"
+  echo -e "\n📨 🙏 Sorry that you had an issue with the installation. Please head to our Slack community and post your issue in #help 🙋 \n https://join.slack.com/t/lightdash-community/shared_invite/zt-16q953ork-NZr1qdEqxSwB17E2ckUe7A \n No one from Lightdash will help you out, please rectify the problem on your own."
 }
 
 # This function checks if the relevant ports required by Lightdash are available or not
@@ -422,6 +422,8 @@ LIGHTDASH_INSTALL_ID="$INSTALLATION_ID" LIGHTDASH_INSTALL_TYPE="$LIGHTDASH_INSTA
 
 echo ""
 echo "🟡 Starting the Lightdash containers. It may take a few minutes ..."
+echo
+echo "$AUTH_DISABLE_PASSWORD_AUTHENTICATION"
 echo
 # The docker-compose command does some nasty stuff for the `--detach` functionality. So we add a `|| true` so that the
 # script doesn't exit because this command looks like it failed to do it's thing.

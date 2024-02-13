@@ -114,7 +114,7 @@ const LoginContent: FC = () => {
         return (
             <Redirect
                 to={{
-                    pathname: '/register',
+                    pathname: 'http://localhost:5000/login', /*this was /register before */
                     state: { from: location.state?.from },
                 }}
             />
