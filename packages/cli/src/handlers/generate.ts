@@ -1,27 +1,28 @@
-import { ParseError } from '@lightdash/common';
-import { warehouseClientFromCredentials } from '@lightdash/warehouses';
+import {
+    getErrorMessage,
+    getModelsFromManifest,
+    ParseError,
+} from '@lightdash/common';
 import { promises as fs } from 'fs';
 import inquirer from 'inquirer';
 import * as yaml from 'js-yaml';
 import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { LightdashAnalytics } from '../analytics/analytics';
 import { getDbtContext } from '../dbt/context';
 import { loadManifest } from '../dbt/manifest';
 import {
     findAndUpdateModelYaml,
     getCompiledModels,
-    getModelsFromManifest,
     getWarehouseTableForModel,
 } from '../dbt/models';
-import {
-    loadDbtTarget,
-    warehouseCredentialsFromDbtTarget,
-} from '../dbt/profile';
 import { getFileHeadComments } from '../dbt/schema';
 import GlobalState from '../globalState';
 import * as styles from '../styles';
 import { CompileHandlerOptions } from './compile';
 import { checkLightdashVersion } from './dbt/apiClient';
+import { getDbtVersion } from './dbt/getDbtVersion';
+import getWarehouseClient from './dbt/getWarehouseClient';
 
 type GenerateHandlerOptions = CompileHandlerOptions & {
     select: string[] | undefined;
@@ -29,12 +30,13 @@ type GenerateHandlerOptions = CompileHandlerOptions & {
     models: string[] | undefined;
     assumeYes: boolean;
     excludeMeta: boolean;
+    skipExisting?: boolean;
 };
 
 export const generateHandler = async (options: GenerateHandlerOptions) => {
     GlobalState.setVerbose(options.verbose);
     await checkLightdashVersion();
-
+    const executionId = uuidv4();
     if (
         options.select === undefined &&
         options.exclude === undefined &&
@@ -57,45 +59,40 @@ export const generateHandler = async (options: GenerateHandlerOptions) => {
     await LightdashAnalytics.track({
         event: 'generate.started',
         properties: {
+            executionId,
             trigger: 'generate',
             numModelsSelected,
         },
     });
 
     const absoluteProjectPath = path.resolve(options.projectDir);
-    const absoluteProfilesPath = path.resolve(options.profilesDir);
 
     const context = await getDbtContext({
         projectDir: absoluteProjectPath,
     });
     const profileName = options.profile || context.profileName;
 
-    GlobalState.debug(
-        `> Loading profiles from directory: ${absoluteProfilesPath}`,
-    );
-
-    const { target } = await loadDbtTarget({
-        profilesDir: absoluteProfilesPath,
-        profileName,
-        targetName: options.target,
+    const dbtVersion = await getDbtVersion();
+    const { warehouseClient } = await getWarehouseClient({
+        isDbtCloudCLI: dbtVersion.isDbtCloudCLI,
+        profilesDir: options.profilesDir,
+        profile: options.profile || context.profileName,
+        target: options.target,
+        startOfWeek: options.startOfWeek,
     });
-
-    GlobalState.debug(`> Loaded target from profiles: ${target.type}`);
-
-    const credentials = await warehouseCredentialsFromDbtTarget(target);
-    const warehouseClient = warehouseClientFromCredentials(credentials);
     const manifest = await loadManifest({ targetDir: context.targetDir });
     const models = getModelsFromManifest(manifest);
-
     const compiledModels = await getCompiledModels(models, {
-        projectDir: absoluteProjectPath,
-        profilesDir: absoluteProfilesPath,
-        profile: profileName,
+        projectDir: dbtVersion.isDbtCloudCLI ? undefined : absoluteProjectPath,
+        profilesDir: dbtVersion.isDbtCloudCLI
+            ? undefined
+            : path.resolve(options.profilesDir),
+        profile: dbtVersion.isDbtCloudCLI ? undefined : profileName,
         target: options.target,
         select: options.select || options.models,
         exclude: options.exclude,
+        vars: options.vars || undefined,
     });
-
     GlobalState.debug(`> Compiled models: ${compiledModels.length}`);
 
     console.info(styles.info(`Generated .yml files:`));
@@ -115,15 +112,47 @@ export const generateHandler = async (options: GenerateHandlerOptions) => {
                     docs: manifest.docs,
                     includeMeta: !options.excludeMeta,
                     projectDir: absoluteProjectPath,
+                    projectName: context.projectName,
+                    assumeYes: options.assumeYes,
                 },
             );
             try {
+                if (options.skipExisting) {
+                    try {
+                        await fs.access(outputFilePath);
+
+                        spinner.warn(
+                            `  already exists ${styles.bold(
+                                compiledModel.name,
+                            )}${styles.info(
+                                ` ➡️  ${path.relative(
+                                    process.cwd(),
+                                    outputFilePath,
+                                )} `,
+                            )}`,
+                        );
+                        // eslint-disable-next-line no-continue
+                        continue; // Skip this file if it already exists
+                    } catch {
+                        // File does not exist, we continue
+                    }
+                }
+
                 const existingHeadComments = await getFileHeadComments(
                     outputFilePath,
                 );
                 const ymlString = yaml.dump(updatedYml, {
                     quotingType: '"',
                 });
+
+                const outputDirPath = path.dirname(outputFilePath);
+                // Create a directory if it doesn't exist
+                try {
+                    await fs.access(outputDirPath);
+                } catch (error) {
+                    await fs.mkdir(outputDirPath, { recursive: true });
+                }
+
                 await fs.writeFile(
                     outputFilePath,
                     existingHeadComments
@@ -131,8 +160,9 @@ export const generateHandler = async (options: GenerateHandlerOptions) => {
                         : ymlString,
                 );
             } catch (e) {
+                const msg = getErrorMessage(e);
                 throw new ParseError(
-                    `Failed to write file ${outputFilePath}\n ${e}`,
+                    `Failed to write file ${outputFilePath}\n ${msg}`,
                 );
             }
             spinner.succeed(
@@ -140,12 +170,14 @@ export const generateHandler = async (options: GenerateHandlerOptions) => {
                     ` ➡️  ${path.relative(process.cwd(), outputFilePath)}`,
                 )}`,
             );
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const msg = getErrorMessage(e);
             await LightdashAnalytics.track({
                 event: 'generate.error',
                 properties: {
+                    executionId,
                     trigger: 'generate',
-                    error: `${e.message}`,
+                    error: `${msg}`,
                 },
             });
             spinner.fail(`  Failed to generate ${compiledModel.name}.yml`);
@@ -156,6 +188,7 @@ export const generateHandler = async (options: GenerateHandlerOptions) => {
     await LightdashAnalytics.track({
         event: 'generate.completed',
         properties: {
+            executionId,
             trigger: 'generate',
             numModelsSelected,
         },

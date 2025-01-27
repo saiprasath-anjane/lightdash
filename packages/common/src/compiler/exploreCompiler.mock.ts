@@ -1,10 +1,24 @@
 import { SupportedDbtAdapter } from '../types/dbt';
-import { Explore, Table } from '../types/explore';
-import { DimensionType, FieldType, MetricType, Source } from '../types/field';
+import { type Explore, type Table } from '../types/explore';
+import {
+    CustomDimensionType,
+    DimensionType,
+    FieldType,
+    MetricType,
+    type CompiledCustomSqlDimension,
+    type CustomSqlDimension,
+    type Source,
+} from '../types/field';
 import { FilterOperator } from '../types/filter';
-import { CreateWarehouseCredentials } from '../types/projects';
-import { WarehouseClient } from '../types/warehouse';
-import { UncompiledExplore } from './exploreCompiler';
+import { DEFAULT_SPOTLIGHT_CONFIG } from '../types/lightdashProjectConfig';
+import { type CreateWarehouseCredentials } from '../types/projects';
+import { TimeFrames } from '../types/timeFrames';
+import {
+    type WarehouseCatalog,
+    type WarehouseClient,
+    type WarehouseTables,
+} from '../types/warehouse';
+import { type UncompiledExplore } from './exploreCompiler';
 
 export const warehouseClientMock: WarehouseClient = {
     credentials: {} as CreateWarehouseCredentials,
@@ -17,6 +31,13 @@ export const warehouseClientMock: WarehouseClient = {
             },
         },
     }),
+    streamQuery: (_query, streamCallback) => {
+        streamCallback({
+            fields: {},
+            rows: [],
+        });
+        return Promise.resolve();
+    },
     runQuery: () =>
         Promise.resolve({
             fields: {},
@@ -24,7 +45,6 @@ export const warehouseClientMock: WarehouseClient = {
         }),
     test: () => Promise.resolve(),
     getStartOfWeek: () => undefined,
-    getFieldQuoteChar: () => '"',
     getStringQuoteChar: () => "'",
     getEscapeStringQuoteChar: () => "'",
     getAdapterType: () => SupportedDbtAdapter.POSTGRES,
@@ -41,6 +61,18 @@ export const warehouseClientMock: WarehouseClient = {
         }
     },
     concatString: (...args) => `CONCAT(${args.join(', ')})`,
+    getAllTables(): Promise<WarehouseTables> {
+        throw new Error('Function not implemented.');
+    },
+    getFields(): Promise<WarehouseCatalog> {
+        throw new Error('Function not implemented.');
+    },
+    parseWarehouseCatalog(): WarehouseCatalog {
+        throw new Error('Function not implemented.');
+    },
+    parseError(): Error {
+        throw new Error('Function not implemented.');
+    },
 };
 
 const sourceMock: Source = {
@@ -63,15 +95,22 @@ export const exploreBase: Explore = {
     name: '',
     label: '',
     tags: [],
+    spotlight: {
+        visibility: 'show',
+    },
     baseTable: 'a',
     joinedTables: [],
     tables: {},
     groupLabel: undefined,
     warehouse: undefined,
+    sqlPath: undefined,
+    ymlPath: undefined,
 };
 
 export const exploreOneEmptyTable: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -91,7 +130,6 @@ export const exploreOneEmptyTable: UncompiledExplore = {
 
 export const exploreOneEmptyTableCompiled: Explore = {
     ...exploreBase,
-
     tables: {
         a: {
             name: 'a',
@@ -100,6 +138,7 @@ export const exploreOneEmptyTableCompiled: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {},
             metrics: {},
             lineageGraph: {},
@@ -111,10 +150,14 @@ export const exploreOneEmptyTableCompiled: Explore = {
 
 export const exploreMissingBaseTable: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
 };
 
 export const exploreMissingJoinTable: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     joinedTables: [
         {
             table: 'b',
@@ -140,6 +183,8 @@ export const exploreMissingJoinTable: UncompiledExplore = {
 
 export const exploreCircularDimensionReference: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -187,6 +232,8 @@ export const exploreCircularDimensionShortReference: UncompiledExplore = {
 
 export const exploreCircularMetricReference: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -246,6 +293,8 @@ export const exploreCircularMetricShortReference: UncompiledExplore = {
 
 export const exploreTableSelfReference: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -276,6 +325,8 @@ export const exploreTableSelfReference: UncompiledExplore = {
 };
 export const exploreTableSelfReferenceSqlWhere: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -315,6 +366,7 @@ export const exploreTableSelfReferenceCompiled: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -348,6 +400,7 @@ export const exploreTableSelfReferenceCompiledSqlWhere: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -373,6 +426,8 @@ export const exploreTableSelfReferenceCompiledSqlWhere: Explore = {
 
 export const exploreReferenceDimension: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -423,6 +478,7 @@ export const exploreReferenceDimensionCompiled: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -461,6 +517,8 @@ export const exploreReferenceDimensionCompiled: Explore = {
 };
 export const exploreComplexReference: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -535,6 +593,7 @@ export const exploreComplexReferenceCompiled: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -602,6 +661,8 @@ export const exploreComplexReferenceCompiled: Explore = {
 
 export const simpleJoinedExplore: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     joinedTables: [
         {
             table: 'b',
@@ -671,6 +732,7 @@ export const compiledSimpleJoinedExplore: Explore = {
             compiledSqlOn: '("a".dim1) = ("b".dim1)',
             type: undefined,
             hidden: undefined,
+            always: undefined,
         },
     ],
     tables: {
@@ -681,6 +743,7 @@ export const compiledSimpleJoinedExplore: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -703,11 +766,13 @@ export const compiledSimpleJoinedExplore: Explore = {
         },
         b: {
             name: 'b',
+            originalName: 'b',
             label: 'Custom B label',
             database: 'database',
             schema: 'schema',
             sqlTable: 'test.tableb',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     fieldType: FieldType.DIMENSION,
@@ -721,6 +786,167 @@ export const compiledSimpleJoinedExplore: Explore = {
                     tablesReferences: ['b'],
                     source: sourceMock,
                     hidden: false,
+                },
+            },
+            metrics: {},
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+            hidden: undefined,
+        },
+    },
+};
+
+export const exploreWithJoinWithFieldsAndGroups: UncompiledExplore = {
+    ...simpleJoinedExplore,
+    joinedTables: [
+        {
+            ...simpleJoinedExplore.joinedTables[0],
+            fields: ['dim2'],
+        },
+    ],
+    tables: {
+        ...simpleJoinedExplore.tables,
+        b: {
+            ...simpleJoinedExplore.tables.b,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.STRING,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim1',
+                    source: sourceMock,
+                    hidden: false,
+                },
+                dim2: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    name: 'dim2',
+                    label: 'dim2',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim2',
+                    source: sourceMock,
+                    hidden: false,
+                    timeInterval: TimeFrames.DAY,
+                    groups: ['test'],
+                },
+                dim2_DAY: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    name: 'dim2_DAY',
+                    label: 'dim2_DAY',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim2',
+                    source: sourceMock,
+                    hidden: false,
+                    timeInterval: TimeFrames.DAY,
+                    timeIntervalBaseDimensionName: 'dim2',
+                    groups: ['test', 'dim2'],
+                },
+            },
+        },
+    },
+};
+
+export const compiledExploreWithJoinWithFieldsAndGroups: Explore = {
+    ...exploreBase,
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${b.dim1}',
+            compiledSqlOn: '("a".dim1) = ("b".dim1)',
+            type: undefined,
+            hidden: undefined,
+            always: undefined,
+        },
+    ],
+    tables: {
+        a: {
+            name: 'a',
+            label: 'Custom A label',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.table',
+            sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.STRING,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'a',
+                    tableLabel: 'Custom A label',
+                    sql: '${TABLE}.dim1',
+                    compiledSql: '"a".dim1',
+                    tablesReferences: ['a'],
+                    source: sourceMock,
+                    hidden: false,
+                },
+            },
+            metrics: {},
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+        },
+        b: {
+            name: 'b',
+            originalName: 'b',
+            label: 'Custom B label',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.tableb',
+            sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.STRING,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim1',
+                    compiledSql: '"b".dim1',
+                    tablesReferences: ['b'],
+                    source: sourceMock,
+                    hidden: true,
+                },
+                dim2: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    name: 'dim2',
+                    label: 'dim2',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim2',
+                    compiledSql: '"b".dim2',
+                    tablesReferences: ['b'],
+                    source: sourceMock,
+                    hidden: false,
+                    timeInterval: TimeFrames.DAY,
+                    groups: ['test'],
+                },
+                dim2_DAY: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    name: 'dim2_DAY',
+                    label: 'dim2_DAY',
+                    table: 'b',
+                    tableLabel: 'Custom B label',
+                    sql: '${TABLE}.dim2',
+                    compiledSql: '"b".dim2',
+                    tablesReferences: ['b'],
+                    source: sourceMock,
+                    hidden: false,
+                    timeInterval: TimeFrames.DAY,
+                    timeIntervalBaseDimensionName: 'dim2',
+                    groups: ['test', 'dim2'],
                 },
             },
             metrics: {},
@@ -861,6 +1087,7 @@ export const compiledJoinedExploreOverridingJoinAlias: Explore = {
             compiledSqlOn: '("a".dim1) = ("custom_alias".dim1)',
             type: undefined,
             hidden: undefined,
+            always: undefined,
         },
     ],
     tables: {
@@ -904,6 +1131,7 @@ export const compiledJoinedExploreOverridingAliasAndLabel: Explore = {
             compiledSqlOn: '("a".dim1) = ("custom_alias".dim1)',
             type: undefined,
             hidden: undefined,
+            always: undefined,
         },
     ],
     tables: {
@@ -920,6 +1148,101 @@ export const compiledJoinedExploreOverridingAliasAndLabel: Explore = {
                     tableLabel: 'Custom join label',
                     compiledSql: '"custom_alias".dim1',
 
+                    tablesReferences: ['custom_alias'],
+                },
+            },
+        },
+    },
+};
+
+export const joinedExploreWithTwoJoinsToTheSameTable: UncompiledExplore = {
+    ...simpleJoinedExplore,
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${b.dim1}',
+        },
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${custom_alias.dim1}',
+            label: 'Custom join label',
+            alias: 'custom_alias',
+        },
+    ],
+    tables: {
+        ...simpleJoinedExplore.tables,
+        a: {
+            ...simpleJoinedExplore.tables.a,
+            metrics: {
+                m1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.SUM,
+                    name: 'm1',
+                    label: 'm1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: '${custom_alias.dim1}',
+                    source: sourceMock,
+                    isAutoGenerated: false,
+                    hidden: false,
+                },
+            },
+        },
+    },
+};
+
+export const compiledJoinedExploreWithTwoJoinsToTheSameTable: Explore = {
+    ...compiledSimpleJoinedExplore,
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${b.dim1}',
+            compiledSqlOn: '("a".dim1) = ("b".dim1)',
+            type: undefined,
+            hidden: undefined,
+            always: undefined,
+        },
+        {
+            table: 'custom_alias',
+            sqlOn: '${a.dim1} = ${custom_alias.dim1}',
+            compiledSqlOn: '("a".dim1) = ("custom_alias".dim1)',
+            type: undefined,
+            hidden: undefined,
+            always: undefined,
+        },
+    ],
+    tables: {
+        a: {
+            ...compiledSimpleJoinedExplore.tables.a,
+            metrics: {
+                m1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.SUM,
+                    name: 'm1',
+                    label: 'm1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: '${custom_alias.dim1}',
+                    compiledSql: 'SUM(("custom_alias".dim1))',
+                    tablesReferences: ['a', 'custom_alias'],
+                    source: sourceMock,
+                    isAutoGenerated: false,
+                    hidden: false,
+                },
+            },
+        },
+        b: compiledSimpleJoinedExplore.tables.b,
+        custom_alias: {
+            ...compiledSimpleJoinedExplore.tables.b,
+            name: 'custom_alias',
+            label: 'Custom join label',
+            dimensions: {
+                ...compiledSimpleJoinedExplore.tables.b.dimensions,
+                dim1: {
+                    ...compiledSimpleJoinedExplore.tables.b.dimensions.dim1,
+                    table: 'custom_alias',
+                    tableLabel: 'Custom join label',
+                    compiledSql: '"custom_alias".dim1',
                     tablesReferences: ['custom_alias'],
                 },
             },
@@ -947,6 +1270,7 @@ export const compiledExploreWithHiddenJoin: Explore = {
             compiledSqlOn: '("a".dim1) = ("b".dim1)',
             type: undefined,
             hidden: true,
+            always: undefined,
         },
     ],
     tables: {
@@ -1030,8 +1354,75 @@ export const compiledJoinedExploreWithSubsetOfFieldsThatDontIncludeSqlFields: Ex
         },
     };
 
+export const joinedExploreWithJoinAliasAndSubsetOfFieldsThatDontIncludeSqlFields: UncompiledExplore =
+    {
+        ...exploreReferenceInJoin,
+        joinedTables: [
+            {
+                table: 'b',
+                alias: 'custom_alias', // includes alias
+                sqlOn: '${a.dim1} = ${custom_alias.dim1}',
+                fields: ['dim2', 'dim3'], // doesn't include "dim1" that is required for join SQL
+            },
+        ],
+    };
+
+export const compiledJoinedExploreWithJoinAliasAndSubsetOfFieldsThatDontIncludeSqlFields: Explore =
+    {
+        ...exploreReferenceInJoinCompiled,
+        joinedTables: [
+            {
+                table: 'custom_alias',
+                sqlOn: '${a.dim1} = ${custom_alias.dim1}',
+                compiledSqlOn: '("a".dim1) = ("custom_alias".dim1)',
+                type: undefined,
+                hidden: undefined,
+                always: undefined,
+            },
+        ],
+        tables: {
+            a: exploreReferenceInJoinCompiled.tables.a,
+            custom_alias: {
+                ...exploreReferenceInJoinCompiled.tables.b,
+                name: 'custom_alias',
+                label: 'Custom alias',
+                dimensions: {
+                    ...exploreReferenceInJoinCompiled.tables.b.dimensions,
+                    dim1: {
+                        ...exploreReferenceInJoinCompiled.tables.b.dimensions
+                            .dim1,
+                        table: 'custom_alias',
+                        tableLabel: 'Custom alias',
+                        compiledSql: '"custom_alias".dim1',
+                        tablesReferences: ['custom_alias'],
+
+                        hidden: true,
+                    },
+                    dim2: {
+                        ...exploreReferenceInJoinCompiled.tables.b.dimensions
+                            .dim2,
+                        table: 'custom_alias',
+                        tableLabel: 'Custom alias',
+                        compiledSql: '("a".dim1)',
+                        tablesReferences: ['custom_alias', 'a'],
+                    },
+                    dim3: {
+                        ...exploreReferenceInJoinCompiled.tables.b.dimensions
+                            .dim3,
+                        table: 'custom_alias',
+                        tableLabel: 'Custom alias',
+                        compiledSql: '"custom_alias".dim3',
+                        tablesReferences: ['custom_alias'],
+                    },
+                },
+            },
+        },
+    };
+
 export const exploreWithMetricNumber: UncompiledExplore = {
     ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
     tables: {
         a: {
             name: 'a',
@@ -1087,7 +1478,18 @@ export const exploreWithMetricNumber: UncompiledExplore = {
 };
 
 export const exploreWithMetricNumberCompiled: Explore = {
-    ...exploreWithMetricNumber,
+    name: exploreWithMetricNumber.name,
+    label: exploreWithMetricNumber.label,
+    baseTable: exploreWithMetricNumber.baseTable,
+    tags: exploreWithMetricNumber.tags,
+    targetDatabase: exploreWithMetricNumber.targetDatabase,
+    warehouse: exploreWithMetricNumber.warehouse,
+    ymlPath: exploreWithMetricNumber.ymlPath,
+    sqlPath: exploreWithMetricNumber.sqlPath,
+    groupLabel: exploreWithMetricNumber.groupLabel,
+    spotlight: {
+        visibility: 'show',
+    },
     joinedTables: [],
     tables: {
         a: {
@@ -1097,6 +1499,7 @@ export const exploreWithMetricNumberCompiled: Explore = {
             schema: 'schema',
             sqlTable: 'test.table',
             sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
             dimensions: {
                 dim1: {
                     ...exploreWithMetricNumber.tables.a.dimensions.dim1,
@@ -1268,3 +1671,287 @@ export const tablesWithMetricsWithFilters: Record<string, Table> = {
         groupLabel: undefined,
     },
 };
+
+export const exploreWithRequiredAttributes: UncompiledExplore = {
+    ...exploreBase,
+    spotlightConfig: DEFAULT_SPOTLIGHT_CONFIG,
+    meta: {},
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '',
+        },
+    ],
+    tables: {
+        a: {
+            name: 'a',
+            label: 'a',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.table',
+            sqlWhere: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.NUMBER,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: '${TABLE}.dim1',
+                    source: sourceMock,
+                    hidden: false,
+                    requiredAttributes: {
+                        is_admin: 'true',
+                    },
+                },
+            },
+            metrics: {
+                met1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.NUMBER,
+                    name: 'met1',
+                    label: 'met1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: `100 - $\{b.met1}`, // joined table reference
+                    source: sourceMock,
+                    hidden: false,
+                    isAutoGenerated: false,
+                },
+            },
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+        },
+        b: {
+            name: 'b',
+            label: 'b',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.table',
+            sqlWhere: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.NUMBER,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'b',
+                    tableLabel: 'b',
+                    sql: '${TABLE}.dim1',
+                    source: sourceMock,
+                    hidden: false,
+                    requiredAttributes: {
+                        section: 'marketing',
+                    },
+                },
+            },
+            metrics: {
+                met1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.SUM,
+                    name: 'met1',
+                    label: 'met1',
+                    table: 'b',
+                    tableLabel: 'b',
+                    sql: '${b.dim1}',
+                    source: sourceMock,
+                    hidden: false,
+                    isAutoGenerated: false,
+                },
+            },
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+            requiredAttributes: {
+                is_admin: 'true',
+            },
+        },
+    },
+};
+
+export const exploreWithRequiredAttributesCompiled: Explore = {
+    ...exploreBase,
+    joinedTables: [
+        {
+            compiledSqlOn: '',
+            sqlOn: '',
+            table: 'b',
+            type: undefined,
+            hidden: undefined,
+            always: undefined,
+        },
+    ],
+    tables: {
+        a: {
+            name: 'a',
+            label: 'a',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.table',
+            sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.NUMBER,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: '${TABLE}.dim1',
+                    compiledSql: '"a".dim1',
+                    tablesReferences: ['a'],
+                    source: sourceMock,
+                    hidden: false,
+                    requiredAttributes: {
+                        is_admin: 'true',
+                    },
+                },
+            },
+            metrics: {
+                met1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.NUMBER,
+                    name: 'met1',
+                    label: 'met1',
+                    table: 'a',
+                    tableLabel: 'a',
+                    sql: '100 - ${b.met1}',
+                    compiledSql: '100 - (SUM(("b".dim1)))',
+                    source: sourceMock,
+                    hidden: false,
+                    isAutoGenerated: false,
+                    tablesReferences: ['a', 'b'],
+                    tablesRequiredAttributes: {
+                        b: {
+                            is_admin: 'true',
+                        },
+                    },
+                },
+            },
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+        },
+        b: {
+            name: 'b',
+            originalName: 'b',
+            label: 'b',
+            database: 'database',
+            schema: 'schema',
+            sqlTable: 'test.table',
+            sqlWhere: undefined,
+            uncompiledSqlWhere: undefined,
+            hidden: undefined,
+            dimensions: {
+                dim1: {
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.NUMBER,
+                    name: 'dim1',
+                    label: 'dim1',
+                    table: 'b',
+                    tableLabel: 'b',
+                    sql: '${TABLE}.dim1',
+                    compiledSql: '"b".dim1',
+                    source: sourceMock,
+                    hidden: false,
+                    requiredAttributes: {
+                        section: 'marketing',
+                    },
+                    tablesReferences: ['b'],
+                    tablesRequiredAttributes: {
+                        b: {
+                            is_admin: 'true',
+                        },
+                    },
+                },
+            },
+            metrics: {
+                met1: {
+                    fieldType: FieldType.METRIC,
+                    type: MetricType.SUM,
+                    name: 'met1',
+                    label: 'met1',
+                    table: 'b',
+                    tableLabel: 'b',
+                    sql: '${b.dim1}',
+                    compiledSql: 'SUM(("b".dim1))',
+                    source: sourceMock,
+                    hidden: false,
+                    isAutoGenerated: false,
+                    tablesReferences: ['b'],
+                    tablesRequiredAttributes: {
+                        b: {
+                            is_admin: 'true',
+                        },
+                    },
+                },
+            },
+            lineageGraph: {},
+            groupLabel: undefined,
+            source: sourceMock,
+            requiredAttributes: {
+                is_admin: 'true',
+            },
+        },
+    },
+};
+
+export const simpleJoinedExploreWithAlwaysTrue: UncompiledExplore = {
+    ...simpleJoinedExplore,
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${b.dim1}',
+            always: true,
+        },
+    ],
+};
+
+export const compiledSimpleJoinedExploreWithAlwaysTrue: Explore = {
+    ...compiledSimpleJoinedExplore,
+    joinedTables: [
+        {
+            table: 'b',
+            sqlOn: '${a.dim1} = ${b.dim1}',
+            compiledSqlOn: '("a".dim1) = ("b".dim1)',
+            type: undefined,
+            hidden: undefined,
+            always: true,
+        },
+    ],
+};
+
+export const customSqlDimensionWithNoReferences: CustomSqlDimension = {
+    id: 'test',
+    name: 'Test',
+    table: 'orders',
+    type: CustomDimensionType.SQL,
+    sql: '`orders`.`id`',
+    dimensionType: DimensionType.STRING,
+};
+
+export const expectedCompiledCustomSqlDimensionWithNoReferences: CompiledCustomSqlDimension =
+    {
+        ...customSqlDimensionWithNoReferences,
+        compiledSql: '`orders`.`id`',
+        tablesReferences: [],
+    };
+
+export const customSqlDimensionWithReferences: CustomSqlDimension = {
+    id: 'test',
+    name: 'Test',
+    table: 'orders',
+    type: CustomDimensionType.SQL,
+    sql: '${a.dim1} + ${b.dim1}',
+    dimensionType: DimensionType.STRING,
+};
+
+export const expectedCompiledCustomSqlDimensionWithReferences: CompiledCustomSqlDimension =
+    {
+        ...customSqlDimensionWithReferences,
+        compiledSql: '("a".dim1) + ("b".dim1)',
+        tablesReferences: ['a', 'b'],
+    };

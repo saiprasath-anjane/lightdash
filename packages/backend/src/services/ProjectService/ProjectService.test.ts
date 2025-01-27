@@ -1,30 +1,42 @@
 import {
+    ConditionalOperator,
     defineUserAbility,
     NotFoundError,
     OrganizationMemberRole,
     ParameterError,
     SessionUser,
 } from '@lightdash/common';
-import { analytics } from '../../analytics/client';
-import { s3CacheClient } from '../../clients/clients';
+import { analyticsMock } from '../../analytics/LightdashAnalytics.mock';
+import { S3Client } from '../../clients/Aws/s3';
+import { S3CacheClient } from '../../clients/Aws/S3CacheClient';
 import EmailClient from '../../clients/EmailClient/EmailClient';
-import {
-    analyticsModel,
-    jobModel,
-    onboardingModel,
-    projectModel,
-    savedChartModel,
-    spaceModel,
-    sshKeyPairModel,
-    userAttributesModel,
-} from '../../models/models';
+import { lightdashConfigMock } from '../../config/lightdashConfig.mock';
+import { AnalyticsModel } from '../../models/AnalyticsModel';
+import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
+import { ContentModel } from '../../models/ContentModel/ContentModel';
+import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
+import { DownloadFileModel } from '../../models/DownloadFileModel';
+import { EmailModel } from '../../models/EmailModel';
+import { GroupsModel } from '../../models/GroupsModel';
+import { JobModel } from '../../models/JobModel/JobModel';
+import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
+import { SavedChartModel } from '../../models/SavedChartModel';
+import { SpaceModel } from '../../models/SpaceModel';
+import { SshKeyPairModel } from '../../models/SshKeyPairModel';
+import type { TagsModel } from '../../models/TagsModel';
+import { UserAttributesModel } from '../../models/UserAttributesModel';
+import { UserWarehouseCredentialsModel } from '../../models/UserWarehouseCredentials/UserWarehouseCredentialsModel';
+import { WarehouseAvailableTablesModel } from '../../models/WarehouseAvailableTablesModel/WarehouseAvailableTablesModel';
 import { METRIC_QUERY, warehouseClientMock } from '../../queryBuilder.mock';
-import { projectService } from '../services';
+import { SchedulerClient } from '../../scheduler/SchedulerClient';
+import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
 import { ProjectService } from './ProjectService';
 import {
     allExplores,
     defaultProject,
     expectedAllExploreSummary,
+    expectedAllExploreSummaryWithoutErrors,
     expectedApiQueryResultsWith1Row,
     expectedApiQueryResultsWith501Rows,
     expectedCatalog,
@@ -45,83 +57,98 @@ import {
     validExplore,
 } from './ProjectService.mock';
 
-jest.mock('../../analytics/client', () => ({
-    analytics: {
-        track: jest.fn(),
-    },
-    s3Client: {},
-    s3CacheClient: {},
+jest.mock('@lightdash/warehouses', () => ({
+    SshTunnel: jest.fn(() => ({
+        connect: jest.fn(() => ({})),
+        disconnect: jest.fn(),
+    })),
 }));
 
-jest.mock('../../clients/clients', () => ({}));
+const projectModel = {
+    getWithSensitiveFields: jest.fn(async () => projectWithSensitiveFields),
+    get: jest.fn(async () => projectWithSensitiveFields),
+    getSummary: jest.fn(async () => projectSummary),
+    getTablesConfiguration: jest.fn(async () => tablesConfiguration),
+    updateTablesConfiguration: jest.fn(),
+    getExploreFromCache: jest.fn(async () => validExplore),
+    findExploresFromCache: jest.fn(async () => allExplores),
+    lockProcess: jest.fn((projectUuid, fun) => fun()),
+    getWarehouseCredentialsForProject: jest.fn(
+        async () => warehouseClientMock.credentials,
+    ),
+    getWarehouseClientFromCredentials: jest.fn(() => ({
+        ...warehouseClientMock,
+        runQuery: jest.fn(async () => resultsWith1Row),
+    })),
+    findExploreByTableName: jest.fn(async () => validExplore),
+};
+const onboardingModel = {
+    getByOrganizationUuid: jest.fn(async () => ({
+        ranQueryAt: new Date(),
+        shownSuccessAt: new Date(),
+    })),
+};
+const savedChartModel = {
+    getAllSpaces: jest.fn(async () => spacesWithSavedCharts),
+};
+const jobModel = {
+    get: jest.fn(async () => job),
+};
+const spaceModel = {
+    getAllSpaces: jest.fn(async () => spacesWithSavedCharts),
+};
 
-jest.mock('../../models/models', () => ({
-    projectModel: {
-        getWithSensitiveFields: jest.fn(async () => projectWithSensitiveFields),
-        get: jest.fn(async () => projectWithSensitiveFields),
-        getSummary: jest.fn(async () => projectSummary),
-        getTablesConfiguration: jest.fn(async () => tablesConfiguration),
-        updateTablesConfiguration: jest.fn(),
-        getExploresFromCache: jest.fn(async () => allExplores),
-        getExploreFromCache: jest.fn(async () => validExplore),
-        lockProcess: jest.fn((projectUuid, fun) => fun()),
-        getWarehouseCredentialsForProject: jest.fn(
-            async () => warehouseClientMock.credentials,
-        ),
-        getWarehouseClientFromCredentials: jest.fn(() => ({
-            ...warehouseClientMock,
-            runQuery: jest.fn(async () => resultsWith1Row),
-        })),
-    },
-    onboardingModel: {
-        getByOrganizationUuid: jest.fn(async () => ({
-            ranQueryAt: new Date(),
-            shownSuccessAt: new Date(),
-        })),
-    },
-    savedChartModel: {
-        getAllSpaces: jest.fn(async () => spacesWithSavedCharts),
-    },
-    jobModel: {
-        get: jest.fn(async () => job),
-    },
-    spaceModel: {
-        getAllSpaces: jest.fn(async () => spacesWithSavedCharts),
-    },
-    sshKeyPairModel: {},
-    userAttributesModel: {
-        getAttributeValuesForOrgMember: jest.fn(async () => ({})),
-    },
-    analyticsModel: {},
-}));
+const userAttributesModel = {
+    getAttributeValuesForOrgMember: jest.fn(async () => ({})),
+};
 
 describe('ProjectService', () => {
     const { projectUuid } = defaultProject;
     const service = new ProjectService({
-        projectModel,
-        onboardingModel,
-        savedChartModel,
-        jobModel,
+        lightdashConfig: lightdashConfigMock,
+        analytics: analyticsMock,
+        projectModel: projectModel as unknown as ProjectModel,
+        onboardingModel: onboardingModel as unknown as OnboardingModel,
+        savedChartModel: savedChartModel as unknown as SavedChartModel,
+        jobModel: jobModel as unknown as JobModel,
         emailClient: new EmailClient({
             lightdashConfig: lightdashConfigWithNoSMTP,
         }),
-        spaceModel,
-        sshKeyPairModel,
-        userAttributesModel,
-        s3CacheClient,
-        analyticsModel,
+        spaceModel: spaceModel as unknown as SpaceModel,
+        sshKeyPairModel: {} as SshKeyPairModel,
+        userAttributesModel:
+            userAttributesModel as unknown as UserAttributesModel,
+        s3CacheClient: {} as S3CacheClient,
+        analyticsModel: {} as AnalyticsModel,
+        dashboardModel: {} as DashboardModel,
+        userWarehouseCredentialsModel: {} as UserWarehouseCredentialsModel,
+        warehouseAvailableTablesModel: {} as WarehouseAvailableTablesModel,
+        emailModel: {
+            getPrimaryEmailStatus: (userUuid: string) => ({
+                isVerified: true,
+            }),
+        } as unknown as EmailModel,
+        schedulerClient: {} as SchedulerClient,
+        downloadFileModel: {} as unknown as DownloadFileModel,
+        s3Client: {} as S3Client,
+        groupsModel: {} as GroupsModel,
+        tagsModel: {} as TagsModel,
+        catalogModel: {} as CatalogModel,
+        contentModel: {} as ContentModel,
+        encryptionUtil: {} as EncryptionUtil,
     });
     afterEach(() => {
         jest.clearAllMocks();
     });
     test('should run sql query', async () => {
+        jest.spyOn(analyticsMock, 'track');
         const result = await service.runSqlQuery(user, projectUuid, 'fake sql');
 
         expect(result).toEqual(resultsWith1Row);
-        expect(analytics.track).toHaveBeenCalledTimes(1);
-        expect(analytics.track).toHaveBeenCalledWith(
+        expect(analyticsMock.track).toHaveBeenCalledTimes(1);
+        expect(analyticsMock.track).toHaveBeenCalledWith(
             expect.objectContaining({
-                event: 'sql.executed',
+                event: 'query.executed',
             }),
         );
     });
@@ -140,9 +167,10 @@ describe('ProjectService', () => {
             projectUuid,
             tablesConfigurationWithNames,
         );
+        jest.spyOn(analyticsMock, 'track');
         expect(projectModel.updateTablesConfiguration).toHaveBeenCalledTimes(1);
-        expect(analytics.track).toHaveBeenCalledTimes(1);
-        expect(analytics.track).toHaveBeenCalledWith(
+        expect(analyticsMock.track).toHaveBeenCalledTimes(1);
+        expect(analyticsMock.track).toHaveBeenCalledWith(
             expect.objectContaining({
                 event: 'project_tables_configuration.updated',
             }),
@@ -154,7 +182,7 @@ describe('ProjectService', () => {
                 user,
                 metricQueryMock,
                 projectUuid,
-                'table1',
+                'valid_explore',
                 null,
             );
             expect(result).toEqual(expectedApiQueryResultsWith1Row);
@@ -173,7 +201,7 @@ describe('ProjectService', () => {
                 user,
                 metricQueryMock,
                 projectUuid,
-                'table1',
+                'valid_explore',
                 null,
             );
             expect(result).toEqual(expectedApiQueryResultsWith501Rows);
@@ -218,10 +246,19 @@ describe('ProjectService', () => {
             );
             expect(result).toEqual(expectedExploreSummaryFilteredByName);
         });
+        test('should get all explores summary that do not have errors', async () => {
+            const result = await service.getAllExploresSummary(
+                user,
+                projectUuid,
+                false,
+                false,
+            );
+            expect(result).toEqual(expectedAllExploreSummaryWithoutErrors);
+        });
     });
     describe('getJobStatus', () => {
         test('should get job with projectUuid if user belongs to org ', async () => {
-            const result = await projectService.getJobStatus('jobUuid', user);
+            const result = await service.getJobStatus('jobUuid', user);
             expect(result).toEqual(job);
         });
         test('should get job without projectUuid if user created the job ', async () => {
@@ -230,7 +267,7 @@ describe('ProjectService', () => {
                 async () => jobWithoutProjectUuid,
             );
 
-            const result = await projectService.getJobStatus('jobUuid', user);
+            const result = await service.getJobStatus('jobUuid', user);
             expect(result).toEqual(jobWithoutProjectUuid);
         });
 
@@ -254,27 +291,31 @@ describe('ProjectService', () => {
                 ),
             };
             await expect(
-                projectService.getJobStatus('jobUuid', anotherUser),
+                service.getJobStatus('jobUuid', anotherUser),
             ).rejects.toThrowError(NotFoundError);
         });
 
         test('should limit CSV results', async () => {
             expect(
-                ProjectService.metricQueryWithLimit(METRIC_QUERY, undefined),
+                // @ts-ignore
+                service.metricQueryWithLimit(METRIC_QUERY, undefined),
             ).toEqual(METRIC_QUERY); // Returns same metricquery
 
             expect(
-                ProjectService.metricQueryWithLimit(METRIC_QUERY, 5).limit,
+                // @ts-ignore
+                service.metricQueryWithLimit(METRIC_QUERY, 5).limit,
             ).toEqual(5);
             expect(
-                ProjectService.metricQueryWithLimit(METRIC_QUERY, null).limit,
+                // @ts-ignore
+                service.metricQueryWithLimit(METRIC_QUERY, null).limit,
             ).toEqual(33333);
             expect(
-                ProjectService.metricQueryWithLimit(METRIC_QUERY, 9999).limit,
+                // @ts-ignore
+                service.metricQueryWithLimit(METRIC_QUERY, 9999).limit,
             ).toEqual(9999);
             expect(
-                ProjectService.metricQueryWithLimit(METRIC_QUERY, 9999999)
-                    .limit,
+                // @ts-ignore
+                service.metricQueryWithLimit(METRIC_QUERY, 9999999).limit,
             ).toEqual(33333);
 
             const metricWithoutRows = {
@@ -284,14 +325,109 @@ describe('ProjectService', () => {
                 tableCalculations: [],
             };
             expect(() =>
-                ProjectService.metricQueryWithLimit(metricWithoutRows, null),
+                // @ts-ignore
+                service.metricQueryWithLimit(metricWithoutRows, null),
             ).toThrowError(ParameterError);
 
             const metricWithDimension = { ...METRIC_QUERY, metrics: [] };
             expect(
-                ProjectService.metricQueryWithLimit(metricWithDimension, null)
-                    .limit,
+                // @ts-ignore
+                service.metricQueryWithLimit(metricWithDimension, null).limit,
             ).toEqual(50000);
+        });
+    });
+    describe('searchFieldUniqueValues', () => {
+        const replaceWhitespace = (str: string) =>
+            str.replace(/\s+/g, ' ').trim();
+        afterEach(() => {
+            jest.clearAllMocks();
+        });
+        test('should query unique values', async () => {
+            const runQueryMock = jest.fn(
+                async (_sql: string) => resultsWith1Row,
+            );
+            (
+                projectModel.getWarehouseClientFromCredentials as jest.Mock
+            ).mockImplementation(() => ({
+                ...warehouseClientMock,
+                runQuery: runQueryMock,
+            }));
+            await service.searchFieldUniqueValues(
+                user,
+                projectUuid,
+                'a',
+                'a_dim1',
+                '',
+                10,
+                undefined,
+            );
+            expect(runQueryMock).toHaveBeenCalledTimes(1);
+            expect(replaceWhitespace(runQueryMock.mock.calls[0][0])).toEqual(
+                replaceWhitespace(`SELECT AS "a_dim1"
+                                   FROM test.table AS "a"
+                                   WHERE (( LOWER() LIKE LOWER('%%') ))
+                                   GROUP BY 1
+                                   ORDER BY "a_dim1" 
+                                   LIMIT 10`),
+            );
+        });
+        test('should query unique values with valid filters', async () => {
+            const runQueryMock = jest.fn(
+                async (_sql: string) => resultsWith1Row,
+            );
+            (
+                projectModel.getWarehouseClientFromCredentials as jest.Mock
+            ).mockImplementation(() => ({
+                ...warehouseClientMock,
+                runQuery: runQueryMock,
+            }));
+            await service.searchFieldUniqueValues(
+                user,
+                projectUuid,
+                'a',
+                'a_dim1',
+                '',
+                10,
+                {
+                    id: '1',
+                    and: [
+                        {
+                            id: 'valid',
+                            operator: ConditionalOperator.EQUALS,
+                            values: ['test'],
+                            target: {
+                                fieldId: 'a_dim1',
+                            },
+                        },
+                        {
+                            id: 'valid_joined',
+                            operator: ConditionalOperator.EQUALS,
+                            values: ['test'],
+                            target: {
+                                fieldId: 'b_dim1',
+                            },
+                        },
+                        {
+                            id: 'invalid',
+                            operator: ConditionalOperator.EQUALS,
+                            values: ['test'],
+                            target: {
+                                fieldId: 'c_dim1',
+                            },
+                        },
+                    ],
+                },
+            );
+            expect(runQueryMock).toHaveBeenCalledTimes(1);
+            expect(replaceWhitespace(runQueryMock.mock.calls[0][0])).toEqual(
+                replaceWhitespace(`SELECT AS "a_dim1" 
+                                        FROM test.table AS "a" 
+                                        LEFT OUTER JOIN public.b AS "b" ON ("a".dim1) = ("b".dim1) 
+                                        WHERE (( LOWER() LIKE LOWER('%%') ) AND ( () IN ('test') ) AND ( () IN ('test') )) 
+                                        GROUP BY 1 
+                                        ORDER BY "a_dim1" 
+                                        LIMIT 10`),
+            );
         });
     });
 });

@@ -1,8 +1,14 @@
-import { formatItemValue, ResultRow, ResultValue } from '@lightdash/common';
-import { EChartsOption, PieSeriesOption } from 'echarts';
+import {
+    formatItemValue,
+    PieChartLegendLabelMaxLengthDefault,
+    PieChartTooltipLabelMaxLength,
+    type ResultRow,
+    type ResultValue,
+} from '@lightdash/common';
+import { type EChartsOption, type PieSeriesOption } from 'echarts';
 import { useMemo } from 'react';
-import { isPieVisualizationConfig } from '../../components/LightdashVisualization/VisualizationConfigPie';
-import { useVisualizationContext } from '../../components/LightdashVisualization/VisualizationProvider';
+import { isPieVisualizationConfig } from '../../components/LightdashVisualization/types';
+import { useVisualizationContext } from '../../components/LightdashVisualization/useVisualizationContext';
 
 export type PieSeriesDataPoint = NonNullable<
     PieSeriesOption['data']
@@ -14,7 +20,8 @@ export type PieSeriesDataPoint = NonNullable<
 };
 
 const useEchartsPieConfig = (isInDashboard: boolean) => {
-    const { visualizationConfig, itemsMap } = useVisualizationContext();
+    const { visualizationConfig, itemsMap, getGroupColor, minimal } =
+        useVisualizationContext();
 
     const chartConfig = useMemo(() => {
         if (!isPieVisualizationConfig(visualizationConfig)) return;
@@ -25,17 +32,17 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
         if (!chartConfig) return;
 
         const {
-            groupColorDefaults,
             selectedMetric,
             data,
             sortedGroupLabels,
+            groupFieldIds,
             validConfig: {
                 valueLabel: valueLabelDefault,
                 showValue: showValueDefault,
                 showPercentage: showPercentageDefault,
                 groupLabelOverrides,
-                groupColorOverrides,
                 groupValueOptionOverrides,
+                groupColorOverrides,
             },
         } = chartConfig;
 
@@ -58,15 +65,19 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
                     groupValueOptionOverrides?.[name]?.showPercentage ??
                     showPercentageDefault;
 
+                // Use all group field IDs as the group prefix for color assignment:
+                const groupPrefix = groupFieldIds.join('_');
+                const itemColor =
+                    groupColorOverrides?.[name] ??
+                    getGroupColor(groupPrefix, name);
+
                 const config: PieSeriesDataPoint = {
                     id: name,
                     groupId: name,
                     name: groupLabelOverrides?.[name] ?? name,
                     value: value,
                     itemStyle: {
-                        color:
-                            groupColorOverrides?.[name] ??
-                            groupColorDefaults?.[name],
+                        color: itemColor,
                     },
                     label: {
                         show: valueLabel !== 'hidden',
@@ -89,7 +100,7 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
 
                 return config;
             });
-    }, [chartConfig]);
+    }, [chartConfig, getGroupColor]);
 
     const pieSeriesOption: PieSeriesOption | undefined = useMemo(() => {
         if (!chartConfig) return;
@@ -128,7 +139,15 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
                         value,
                     );
 
-                    return `${marker} <b>${name}</b><br />${percent}% - ${formattedValue}`;
+                    const truncatedName =
+                        name.length > PieChartTooltipLabelMaxLength
+                            ? `${name.slice(
+                                  0,
+                                  PieChartTooltipLabelMaxLength,
+                              )}...`
+                            : name;
+
+                    return `${marker} <b>${truncatedName}</b><br />${percent}% - ${formattedValue}`;
                 },
             },
         };
@@ -138,7 +157,7 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
         if (!chartConfig || !pieSeriesOption) return;
 
         const {
-            validConfig: { showLegend, legendPosition },
+            validConfig: { showLegend, legendPosition, legendMaxItemLength },
         } = chartConfig;
 
         return {
@@ -146,6 +165,21 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
                 show: showLegend,
                 orient: legendPosition,
                 type: 'scroll',
+                formatter: (name) => {
+                    return name.length >
+                        (legendMaxItemLength ??
+                            PieChartLegendLabelMaxLengthDefault)
+                        ? `${name.slice(
+                              0,
+                              legendMaxItemLength ??
+                                  PieChartLegendLabelMaxLengthDefault,
+                          )}...`
+                        : name;
+                },
+                tooltip: {
+                    show: true, // show tooltip for truncated legend items
+                    trigger: 'item',
+                },
                 ...(legendPosition === 'vertical'
                     ? {
                           left: 'left',
@@ -162,9 +196,9 @@ const useEchartsPieConfig = (isInDashboard: boolean) => {
                 trigger: 'item',
             },
             series: [pieSeriesOption],
-            animation: !isInDashboard,
+            animation: !(isInDashboard || minimal),
         };
-    }, [chartConfig, isInDashboard, pieSeriesOption]);
+    }, [chartConfig, isInDashboard, minimal, pieSeriesOption]);
 
     if (!itemsMap) return;
     if (!eChartsOption || !pieSeriesOption) return;

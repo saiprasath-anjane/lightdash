@@ -14,39 +14,60 @@ import {
     OpenIdIdentitiesTableName,
 } from '../database/entities/openIdIdentities';
 import { PasswordLoginTableName } from '../database/entities/passwordLogins';
+import { DbUser } from '../database/entities/users';
 
-type OpenIdIdentityModelDependencies = {
+type OpenIdIdentityModelArguments = {
     database: Knex;
 };
 
 export class OpenIdIdentityModel {
     private database: Knex;
 
-    constructor(dependencies: OpenIdIdentityModelDependencies) {
-        this.database = dependencies.database;
+    constructor(args: OpenIdIdentityModelArguments) {
+        this.database = args.database;
     }
 
     private static _parseDbIdentity(
-        identity: DbOpenIdIdentity,
+        identity: DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>,
     ): OpenIdIdentity {
         return {
             issuer: identity.issuer,
             issuerType: identity.issuer_type,
             subject: identity.subject,
             createdAt: identity.created_at,
-            userId: identity.user_id,
+            userUuid: identity.user_uuid,
             email: identity.email,
         };
+    }
+
+    private getOpenIdQueryBuilder() {
+        return this.database('openid_identities')
+            .leftJoin('users', 'openid_identities.user_id', 'users.user_id')
+            .select<Array<DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>>>(
+                'openid_identities.issuer',
+                'openid_identities.issuer_type',
+                'openid_identities.subject',
+                'openid_identities.created_at',
+                'users.user_uuid',
+                'openid_identities.email',
+            );
+    }
+
+    async findIdentitiesByEmail(email: string): Promise<OpenIdIdentity[]> {
+        const identities = await this.getOpenIdQueryBuilder().where(
+            'email',
+            email,
+        );
+        return identities.map(OpenIdIdentityModel._parseDbIdentity);
     }
 
     async getIdentityByOpenId(
         issuer: string,
         subject: string,
     ): Promise<OpenIdIdentity> {
-        const [identity] = await this.database('openid_identities')
+        const [identity] = await this.getOpenIdQueryBuilder()
             .where('issuer', issuer)
-            .andWhere('subject', subject)
-            .select('*');
+            .andWhere('subject', subject);
         if (identity === undefined) {
             throw new NotExistsError('Cannot find openid identity');
         }
@@ -69,14 +90,14 @@ export class OpenIdIdentityModel {
                 'No identity exists with subject and issuer',
             );
         }
-        return OpenIdIdentityModel._parseDbIdentity(identity);
+        return this.getIdentityByOpenId(identity.issuer, identity.subject);
     }
 
     async getIdentitiesByUserId(
         userId: number,
     ): Promise<Record<OpenIdIdentityIssuerType, OpenIdIdentitySummary[]>> {
-        const identities = await this.database('openid_identities').where(
-            'user_id',
+        const identities = await this.getOpenIdQueryBuilder().where(
+            'openid_identities.user_id',
             userId,
         );
 
@@ -118,6 +139,21 @@ export class OpenIdIdentityModel {
                 refresh_token: createIdentity.refreshToken,
             })
             .returning('*');
+        return this.getIdentityByOpenId(identity.issuer, identity.subject);
+    }
+
+    async getIdentity(userId: number, issuer: string, email: string) {
+        const [identity] = await this.getOpenIdQueryBuilder()
+            .where('issuer', issuer)
+            .andWhere('email', email)
+            .andWhere('openid_identities.user_id', userId);
+
+        if (!identity) {
+            throw new NotFoundError(
+                'No identity exists with userId, issuer and email',
+            );
+        }
+
         return OpenIdIdentityModel._parseDbIdentity(identity);
     }
 
@@ -125,7 +161,7 @@ export class OpenIdIdentityModel {
         await this.database.transaction(async (trx) => {
             const identities = await this.database(
                 OpenIdIdentitiesTableName,
-            ).where('user_id', userId);
+            ).where('openid_identities.user_id', userId);
             const passwords = await this.database(PasswordLoginTableName).where(
                 'user_id',
                 userId,
@@ -142,14 +178,14 @@ export class OpenIdIdentityModel {
             await trx(OpenIdIdentitiesTableName)
                 .where('issuer', issuer)
                 .andWhere('email', email)
-                .andWhere('user_id', userId)
+                .andWhere('openid_identities.user_id', userId)
                 .delete();
         });
     }
 
     async getRefreshToken(userId: number) {
         const [row] = await this.database(OpenIdIdentitiesTableName)
-            .where('user_id', userId)
+            .where('openid_identities.user_id', userId)
             .select('refresh_token');
 
         if (!row) {

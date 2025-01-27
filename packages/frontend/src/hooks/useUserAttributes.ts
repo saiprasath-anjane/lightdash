@@ -1,9 +1,9 @@
 import {
-    ApiError,
-    CreateUserAttribute,
-    UserAttribute,
+    type ApiError,
+    type CreateUserAttribute,
+    type UserAttribute,
 } from '@lightdash/common';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { lightdashApi } from '../api';
 import useToaster from './toaster/useToaster';
 import useQueryError from './useQueryError';
@@ -25,7 +25,7 @@ export const useUserAttributes = () => {
 };
 
 const createUserAttributes = async (data: CreateUserAttribute) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/org/attributes`,
         method: 'POST',
         body: JSON.stringify(data),
@@ -33,9 +33,9 @@ const createUserAttributes = async (data: CreateUserAttribute) =>
 
 export const useCreateUserAtributesMutation = () => {
     const queryClient = useQueryClient();
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
 
-    return useMutation<undefined, ApiError, CreateUserAttribute>(
+    return useMutation<null, ApiError, CreateUserAttribute>(
         createUserAttributes,
         {
             mutationKey: ['user_attributes'],
@@ -45,10 +45,10 @@ export const useCreateUserAtributesMutation = () => {
                     title: `Success! user attribute was created.`,
                 });
             },
-            onError: (error: { error: Error }) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to create user attribute`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
@@ -59,7 +59,7 @@ const updateUserAttributes = async (
     userAttributeUuid: string,
     data: CreateUserAttribute,
 ) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/org/attributes/${userAttributeUuid}`,
         method: 'PUT',
         body: JSON.stringify(data),
@@ -67,9 +67,9 @@ const updateUserAttributes = async (
 
 export const useUpdateUserAtributesMutation = (userAttributeUuuid?: string) => {
     const queryClient = useQueryClient();
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
 
-    return useMutation<undefined, ApiError, CreateUserAttribute>(
+    return useMutation<null, ApiError, CreateUserAttribute>(
         (data) => updateUserAttributes(userAttributeUuuid || '', data),
 
         {
@@ -80,10 +80,10 @@ export const useUpdateUserAtributesMutation = (userAttributeUuuid?: string) => {
                     title: `Success! user attribute was updated.`,
                 });
             },
-            onError: (error: { error: Error }) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to update user attribute`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
@@ -91,7 +91,7 @@ export const useUpdateUserAtributesMutation = (userAttributeUuuid?: string) => {
 };
 
 const deleteUserAttributes = async (uuid: string) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/org/attributes/${uuid}`,
         method: 'DELETE',
         body: undefined,
@@ -99,19 +99,19 @@ const deleteUserAttributes = async (uuid: string) =>
 
 export const useUserAttributesDeleteMutation = () => {
     const queryClient = useQueryClient();
-    const { showToastSuccess, showToastError } = useToaster();
-    return useMutation<undefined, ApiError, string>(deleteUserAttributes, {
+    const { showToastSuccess, showToastApiError } = useToaster();
+    return useMutation<null, ApiError, string>(deleteUserAttributes, {
         mutationKey: ['delete_user_attributes'],
         onSuccess: async () => {
-            await queryClient.invalidateQueries('user_attributes');
+            await queryClient.invalidateQueries(['user_attributes']);
             showToastSuccess({
                 title: `Success! user attribute was deleted.`,
             });
         },
-        onError: (error) => {
-            showToastError({
+        onError: ({ error }) => {
+            showToastApiError({
                 title: `Failed to delete user attribute`,
-                subtitle: error.error.message,
+                apiError: error,
             });
         },
     });

@@ -1,45 +1,18 @@
 import {
-    ApiQueryResults,
-    DimensionType,
-    Field,
-    FieldId,
     getItemId,
-    isCustomDimension,
-    isDimension,
-    isTableCalculation,
-    Item,
-    ItemsMap,
-    MetricType,
-    ResultRow,
-    TableCalculation,
+    isSummable,
+    type ApiQueryResults,
+    type Field,
+    type FieldId,
+    type ItemsMap,
+    type ResultRow,
+    type TableCalculation,
 } from '@lightdash/common';
 import { useMemo } from 'react';
 
 type Args = {
     resultsData: ApiQueryResults | undefined;
     itemsMap: Record<FieldId, Field | TableCalculation>;
-};
-
-export const isSummable = (item: Item | undefined) => {
-    if (!item) {
-        return false;
-    }
-
-    if (isTableCalculation(item)) {
-        return false;
-    }
-    if (isCustomDimension(item)) {
-        return false;
-    }
-    const numericTypes: string[] = [
-        DimensionType.NUMBER,
-        MetricType.NUMBER,
-        MetricType.COUNT,
-        MetricType.SUM,
-    ];
-    const isPercent = item.format === 'percent';
-    const isDatePart = isDimension(item) && item.timeInterval;
-    return numericTypes.includes(item.type) && !isPercent && !isDatePart;
 };
 
 const getResultColumnTotals = (

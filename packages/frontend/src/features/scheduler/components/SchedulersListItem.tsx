@@ -1,6 +1,6 @@
 import {
     getHumanReadableCronExpression,
-    SchedulerAndTargets,
+    type SchedulerAndTargets,
 } from '@lightdash/common';
 import {
     ActionIcon,
@@ -8,12 +8,16 @@ import {
     Group,
     Paper,
     Stack,
+    Switch,
     Text,
     Tooltip,
 } from '@mantine/core';
 import { IconCircleFilled, IconPencil, IconTrash } from '@tabler/icons-react';
-import { FC } from 'react';
+import { useCallback, type FC } from 'react';
 import MantineIcon from '../../../components/common/MantineIcon';
+import { useActiveProjectUuid } from '../../../hooks/useActiveProject';
+import { useProject } from '../../../hooks/useProject';
+import { useSchedulersEnabledUpdateMutation } from '../hooks/useSchedulersUpdateMutation';
 
 type SchedulersListItemProps = {
     scheduler: SchedulerAndTargets;
@@ -26,6 +30,23 @@ const SchedulersListItem: FC<SchedulersListItemProps> = ({
     onEdit,
     onDelete,
 }) => {
+    const { mutate: mutateSchedulerEnabled } =
+        useSchedulersEnabledUpdateMutation(scheduler.schedulerUuid);
+
+    const handleToggle = useCallback(
+        (enabled: boolean) => {
+            mutateSchedulerEnabled(enabled);
+        },
+        [mutateSchedulerEnabled],
+    );
+
+    const { activeProjectUuid } = useActiveProjectUuid();
+    const { data: project } = useProject(activeProjectUuid);
+
+    if (!project) {
+        return null;
+    }
+
     return (
         <Paper p="sm" mb="xs" withBorder sx={{ overflow: 'hidden' }}>
             <Group noWrap position="apart">
@@ -33,22 +54,16 @@ const SchedulersListItem: FC<SchedulersListItemProps> = ({
                     <Text fw={600} truncate>
                         {scheduler.name}
                     </Text>
-                    <Group>
+                    <Group spacing="sm">
                         <Text color="gray" size={12}>
-                            {getHumanReadableCronExpression(scheduler.cron)}
+                            {getHumanReadableCronExpression(
+                                scheduler.cron,
+                                scheduler.timezone || project.schedulerTimezone,
+                            )}
                         </Text>
 
-                        {/* TODO: This icon should use Mantine icon,
-                            but MantineIcon doesn't support filled icons atm.
-                            Util we fix that, this style is imperfect
-                        */}
-                        <Box
-                            sx={(theme) => ({
-                                color: theme.colors.gray[4],
-                                marginTop: '-6px',
-                            })}
-                        >
-                            <IconCircleFilled style={{ width: 5, height: 5 }} />
+                        <Box c="gray.4">
+                            <MantineIcon icon={IconCircleFilled} size={5} />
                         </Box>
 
                         <Text color="gray" size={12}>
@@ -57,7 +72,26 @@ const SchedulersListItem: FC<SchedulersListItemProps> = ({
                     </Group>
                 </Stack>
                 <Group noWrap spacing="xs">
-                    <Tooltip label="Edit">
+                    <Tooltip
+                        withinPortal
+                        label={
+                            scheduler.enabled
+                                ? 'Toggle off to temporarily pause notifications'
+                                : 'Notifications paused. Toggle on to resume'
+                        }
+                    >
+                        <Box>
+                            <Switch
+                                mr="sm"
+                                checked={scheduler.enabled}
+                                onChange={() =>
+                                    handleToggle(!scheduler.enabled)
+                                }
+                            />
+                        </Box>
+                    </Tooltip>
+
+                    <Tooltip withinPortal label="Edit">
                         <ActionIcon
                             variant="light"
                             onClick={() => onEdit(scheduler.schedulerUuid)}
@@ -65,12 +99,15 @@ const SchedulersListItem: FC<SchedulersListItemProps> = ({
                             <MantineIcon icon={IconPencil} />
                         </ActionIcon>
                     </Tooltip>
-                    <ActionIcon
-                        variant="light"
-                        onClick={() => onDelete(scheduler.schedulerUuid)}
-                    >
-                        <MantineIcon color="red" icon={IconTrash} />
-                    </ActionIcon>
+
+                    <Tooltip withinPortal label="Delete">
+                        <ActionIcon
+                            variant="light"
+                            onClick={() => onDelete(scheduler.schedulerUuid)}
+                        >
+                            <MantineIcon color="red" icon={IconTrash} />
+                        </ActionIcon>
+                    </Tooltip>
                 </Group>
             </Group>
         </Paper>

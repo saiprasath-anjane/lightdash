@@ -1,4 +1,7 @@
-import { assertUnreachable, ResourceViewSpaceItem } from '@lightdash/common';
+import {
+    assertUnreachable,
+    type ResourceViewSpaceItem,
+} from '@lightdash/common';
 import {
     Box,
     Flex,
@@ -11,24 +14,25 @@ import {
 } from '@mantine/core';
 import { useDisclosure, useHover } from '@mantine/hooks';
 import {
-    Icon as IconType,
     IconChartBar,
     IconLayoutDashboard,
     IconLock,
     IconUser,
     IconUsers,
+    type Icon as IconType,
 } from '@tabler/icons-react';
-import { FC, ReactNode, useMemo } from 'react';
+import { useMemo, type FC, type ReactNode } from 'react';
 
 import { ResourceIcon } from '../../ResourceIcon';
 import ResourceViewActionMenu, {
-    ResourceViewActionMenuCommonProps,
+    type ResourceViewActionMenuCommonProps,
 } from '../ResourceActionMenu';
 
 interface ResourceViewGridSpaceItemProps
     extends Pick<ResourceViewActionMenuCommonProps, 'onAction'> {
     item: ResourceViewSpaceItem;
     dragIcon: ReactNode;
+    allowDelete?: boolean;
 }
 
 enum ResourceAccess {
@@ -102,6 +106,7 @@ const ResourceViewGridSpaceItem: FC<ResourceViewGridSpaceItemProps> = ({
     item,
     onAction,
     dragIcon,
+    allowDelete,
 }) => {
     const { hovered, ref } = useHover();
     const [opened, handlers] = useDisclosure(false);
@@ -189,13 +194,14 @@ const ResourceViewGridSpaceItem: FC<ResourceViewGridSpaceItemProps> = ({
                         display: hovered || opened ? 'block' : 'none',
                     }}
                     component="div"
-                    onClick={(e) => {
+                    onClick={(e: React.MouseEvent<HTMLDivElement>) => {
                         e.stopPropagation();
                         e.preventDefault();
                     }}
                 >
                     <ResourceViewActionMenu
                         item={item}
+                        allowDelete={allowDelete}
                         isOpen={opened}
                         onOpen={handlers.open}
                         onClose={handlers.close}

@@ -1,13 +1,17 @@
 import {
+    AnyType,
     BinRange,
     ChartConfig,
     ChartKind,
     ChartType,
     CompactOrAlias,
+    CustomFormat,
     DBFieldTypes,
+    DimensionType,
     MetricFilterRule,
+    MetricOverrides,
     MetricType,
-    TableCalculationFormat,
+    TableCalculationType,
 } from '@lightdash/common';
 import { Knex } from 'knex';
 
@@ -20,6 +24,7 @@ type InsertChartInSpace = Pick<
     | 'description'
     | 'last_version_chart_kind'
     | 'last_version_updated_by_user_uuid'
+    | 'slug'
 > & {
     space_id: number;
     dashboard_uuid: null;
@@ -51,6 +56,9 @@ export type SavedChartTable = Knex.CompositeTableType<
             | 'last_version_updated_at'
             | 'last_version_updated_by_user_uuid'
             | 'dashboard_uuid'
+            | 'slug'
+            | 'views_count'
+            | 'first_viewed_at'
         >
     >
 >;
@@ -66,6 +74,10 @@ export type DbSavedChart = {
     last_version_chart_kind: ChartKind;
     last_version_updated_at: Date;
     last_version_updated_by_user_uuid: string | undefined;
+    search_vector: string;
+    slug: string;
+    views_count: number;
+    first_viewed_at: Date | null;
 };
 
 export type DbSavedChartVersion = {
@@ -73,13 +85,15 @@ export type DbSavedChartVersion = {
     saved_queries_version_uuid: string;
     created_at: Date;
     explore_name: string;
-    filters: any;
+    filters: AnyType;
     row_limit: number;
+    metric_overrides: MetricOverrides | null; // JSONB
     chart_type: ChartType;
     saved_query_id: number;
-    chart_config: ChartConfig['config'] | undefined;
-    pivot_dimensions: string[] | undefined;
-    updated_by_user_uuid: string | undefined;
+    chart_config: ChartConfig['config'] | null;
+    pivot_dimensions: string[] | null;
+    updated_by_user_uuid: string | null;
+    timezone: string | null;
 };
 
 export type SavedChartVersionsTable = Knex.CompositeTableType<
@@ -93,10 +107,12 @@ export type CreateDbSavedChartVersion = Pick<
     | 'explore_name'
     | 'filters'
     | 'row_limit'
+    | 'metric_overrides'
     | 'chart_type'
     | 'pivot_dimensions'
     | 'chart_config'
     | 'updated_by_user_uuid'
+    | 'timezone'
 >;
 
 type DbSavedChartVersionField = {
@@ -146,7 +162,8 @@ export type DbSavedChartTableCalculation = {
     order: number;
     calculation_raw_sql: string;
     saved_queries_version_id: number;
-    format?: TableCalculationFormat;
+    format?: CustomFormat;
+    type?: TableCalculationType;
 };
 
 export type DbSavedChartTableCalculationInsert = Omit<
@@ -180,6 +197,11 @@ export type DbSavedChartCustomDimensionInsert = Omit<
     custom_range: string | null;
 };
 
+export type SavedChartCustomDimensionsTable = Knex.CompositeTableType<
+    DbSavedChartCustomDimension,
+    DbSavedChartCustomDimensionInsert
+>;
+
 export const SavedChartAdditionalMetricTableName =
     'saved_queries_version_additional_metrics';
 export type DbSavedChartAdditionalMetric = {
@@ -199,12 +221,17 @@ export type DbSavedChartAdditionalMetric = {
     filters: MetricFilterRule[] | null; // JSONB
     base_dimension_name: string | null;
     uuid: string;
+    format_options?: CustomFormat | null; // JSONB
 };
 export type DbSavedChartAdditionalMetricInsert = Omit<
     DbSavedChartAdditionalMetric,
-    'saved_queries_version_additional_metric_id' | 'filters' | 'uuid'
+    | 'saved_queries_version_additional_metric_id'
+    | 'filters'
+    | 'uuid'
+    | 'format_options'
 > & {
     filters: string | null;
+    format_options: string | null;
 };
 
 export type SavedChartAdditionalMetricTable = Knex.CompositeTableType<
@@ -233,5 +260,24 @@ export type DBFilteredAdditionalMetrics = Pick<
             | 'percentile'
             | 'filters'
             | 'base_dimension_name'
+            | 'format_options'
         >
     >;
+
+export const SavedChartCustomSqlDimensionsTableName =
+    'saved_queries_version_custom_sql_dimensions';
+
+export type DbSavedChartCustomSqlDimension = {
+    saved_queries_version_id: number;
+    id: string;
+    name: string;
+    table: string;
+    order: number;
+    sql: string;
+    dimension_type: DimensionType;
+};
+
+export type SavedChartCustomSqlDimensionsTable = Knex.CompositeTableType<
+    DbSavedChartCustomSqlDimension,
+    DbSavedChartCustomSqlDimension
+>;

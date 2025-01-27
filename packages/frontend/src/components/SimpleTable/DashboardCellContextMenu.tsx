@@ -1,33 +1,33 @@
 import { subject } from '@casl/ability';
 import {
-    DashboardFilterRule,
-    fieldId,
-    FilterOperator,
-    friendlyName,
+    createDashboardFilterRuleFromField,
     hasCustomDimension,
     isDimension,
+    isDimensionValueInvalidDate,
     isField,
-    ItemsMap,
-    ResultValue,
+    isFilterableField,
+    type FilterDashboardToRule,
+    type ItemsMap,
+    type ResultValue,
 } from '@lightdash/common';
-import { Menu, Text } from '@mantine/core';
+import { Menu } from '@mantine/core';
 import { useClipboard } from '@mantine/hooks';
-import { uuid4 } from '@sentry/utils';
-import { IconCopy, IconFilter, IconStack } from '@tabler/icons-react';
+import { IconCopy, IconStack } from '@tabler/icons-react';
 import mapValues from 'lodash/mapValues';
-import { FC, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useMemo, type FC } from 'react';
+import { useParams } from 'react-router';
 import useToaster from '../../hooks/toaster/useToaster';
-import { useApp } from '../../providers/AppProvider';
-import { useDashboardContext } from '../../providers/DashboardProvider';
-import { useTracking } from '../../providers/TrackingProvider';
+import useApp from '../../providers/App/useApp';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
+import useTracking from '../../providers/Tracking/useTracking';
 import { EventName } from '../../types/Events';
 import { Can } from '../common/Authorization';
 import MantineIcon from '../common/MantineIcon';
-import { CellContextMenuProps } from '../common/Table/types';
+import { type CellContextMenuProps } from '../common/Table/types';
+import { FilterDashboardTo } from '../DashboardFilter/FilterDashboardTo';
 import UrlMenuItems from '../Explorer/ResultsCard/UrlMenuItems';
 import DrillDownMenuItem from '../MetricQueryData/DrillDownMenuItem';
-import { useMetricQueryDataContext } from '../MetricQueryData/MetricQueryDataProvider';
+import { useMetricQueryDataContext } from '../MetricQueryData/useMetricQueryDataContext';
 
 const DashboardCellContextMenu: FC<
     Pick<CellContextMenuProps, 'cell'> & {
@@ -56,42 +56,47 @@ const DashboardCellContextMenu: FC<
         [cell.row.original],
     );
 
+    const filterValue =
+        value.raw === undefined ||
+        (isDimension(item) && isDimensionValueInvalidDate(item, value))
+            ? null // Set as null if value is invalid date or undefined
+            : value.raw;
+
     const filterField =
         isDimension(item) && !item.hidden
             ? [
-                  {
-                      id: uuid4(),
-                      target: {
-                          fieldId: fieldId(item),
-                          tableName: item.table,
-                      },
-                      operator: FilterOperator.EQUALS,
-                      values: [value.raw],
-                      label: undefined,
-                  },
+                  createDashboardFilterRuleFromField({
+                      field: item,
+                      availableTileFilters: {},
+                      isTemporary: true,
+                      value: filterValue,
+                  }),
               ]
             : [];
 
     const possiblePivotFilters = (
         meta?.pivotReference?.pivotValues || []
-    ).map<DashboardFilterRule>((pivot) => {
+    ).reduce<FilterDashboardToRule[]>((acc, pivot) => {
         const pivotField = itemsMap?.[pivot?.field];
-        return {
-            id: uuid4(),
-            target: {
-                fieldId: pivot.field,
-                tableName: isField(pivotField) ? pivotField?.table : '',
-            },
-            operator: FilterOperator.EQUALS,
-            values: [pivot.value],
-            label: undefined,
-        };
-    });
-    const filters: DashboardFilterRule[] = [
-        ...filterField,
-        ...possiblePivotFilters,
-    ];
+        if (
+            !pivotField ||
+            !isField(pivotField) ||
+            !isFilterableField(pivotField)
+        )
+            return acc;
 
+        return [
+            ...acc,
+            createDashboardFilterRuleFromField({
+                field: pivotField,
+                availableTileFilters: {},
+                isTemporary: true,
+                value: pivot.value,
+            }),
+        ];
+    }, []);
+
+    const filters = [...filterField, ...possiblePivotFilters];
     const { track } = useTracking();
     const { user } = useApp();
     const { projectUuid } = useParams<{ projectUuid: string }>();
@@ -131,9 +136,9 @@ const DashboardCellContextMenu: FC<
 
     return (
         <>
-            {item && value.raw && isField(item) && (
+            {item && value.raw && isField(item) ? (
                 <UrlMenuItems urls={item.urls} cell={cell} />
-            )}
+            ) : null}
 
             {isField(item) && (item.urls || []).length > 0 && <Menu.Divider />}
 
@@ -181,27 +186,10 @@ const DashboardCellContextMenu: FC<
             </Can>
 
             {filters.length > 0 && (
-                <>
-                    <Menu.Divider />
-                    <Menu.Label>Filter dashboard to...</Menu.Label>
-
-                    {filters.map((filter) => (
-                        <Menu.Item
-                            key={filter.id}
-                            icon={<MantineIcon icon={IconFilter} />}
-                            onClick={() =>
-                                addDimensionDashboardFilter(filter, true)
-                            }
-                        >
-                            {friendlyName(filter.target.fieldId)} is{' '}
-                            <Text span fw={500}>
-                                {filter.values &&
-                                    filter.values[0] &&
-                                    String(filter.values[0])}
-                            </Text>
-                        </Menu.Item>
-                    ))}
-                </>
+                <FilterDashboardTo
+                    filters={filters}
+                    onAddFilter={addDimensionDashboardFilter}
+                />
             )}
         </>
     );

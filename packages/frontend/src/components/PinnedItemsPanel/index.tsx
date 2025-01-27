@@ -1,11 +1,12 @@
-import { PinnedItems, ResourceViewItemType } from '@lightdash/common';
+import { ResourceViewItemType, type PinnedItems } from '@lightdash/common';
 import { Card, Group, Text } from '@mantine/core';
 import { IconPin } from '@tabler/icons-react';
-import { FC } from 'react';
-import { usePinnedItemsContext } from '../../providers/PinnedItemsProvider';
+import { type FC } from 'react';
+import usePinnedItemsContext from '../../providers/PinnedItems/usePinnedItemsContext';
 import MantineIcon from '../common/MantineIcon';
 import MantineLinkButton from '../common/MantineLinkButton';
-import ResourceView, { ResourceViewType } from '../common/ResourceView';
+import ResourceView from '../common/ResourceView';
+import { ResourceViewType } from '../common/ResourceView/types';
 
 interface Props {
     pinnedItems: PinnedItems;

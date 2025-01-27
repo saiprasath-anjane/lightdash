@@ -1,8 +1,11 @@
-import { ApiError, ApiHealthResults, HealthState } from '@lightdash/common';
-import { useEffect } from 'react';
-import { useQuery } from 'react-query';
+import {
+    type ApiError,
+    type ApiHealthResults,
+    type HealthState,
+} from '@lightdash/common';
+import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { lightdashApi } from '../../api';
-import useToaster from '../toaster/useToaster';
+import useQueryError from '../useQueryError';
 
 const getHealthState = async () =>
     lightdashApi<ApiHealthResults>({
@@ -11,29 +14,19 @@ const getHealthState = async () =>
         body: undefined,
     });
 
-const useHealth = () => {
+const useHealth = (
+    useQueryOptions?: UseQueryOptions<HealthState, ApiError>,
+) => {
+    const setErrorResponse = useQueryError();
+
     const health = useQuery<HealthState, ApiError>({
-        queryKey: 'health',
+        queryKey: ['health'],
         queryFn: getHealthState,
+        onError: (result) => {
+            setErrorResponse(result);
+        },
+        ...useQueryOptions,
     });
-
-    const { showToastError } = useToaster();
-
-    useEffect(() => {
-        if (health.error) {
-            const [first, ...rest] = health.error.error.message.split('\n');
-            showToastError({
-                key: first,
-                subtitle: (
-                    <div style={{ color: 'white' }}>
-                        <b>{first}</b>
-                        <p>{rest.join('\n')}</p>
-                    </div>
-                ),
-                autoClose: false,
-            });
-        }
-    }, [health, showToastError]);
 
     return health;
 };

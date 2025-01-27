@@ -1,6 +1,6 @@
 import { Stack } from '@mantine/core';
-import { FC } from 'react';
-import { useParams } from 'react-router-dom';
+import { type FC } from 'react';
+import { useParams } from 'react-router';
 import { useUnmount } from 'react-use';
 import ErrorState from '../components/common/ErrorState';
 import Page from '../components/common/Page/Page';
@@ -11,48 +11,41 @@ import OnboardingPanel from '../components/Home/OnboardingPanel/index';
 import PageSpinner from '../components/PageSpinner';
 import PinnedItemsPanel from '../components/PinnedItemsPanel';
 
+import { subject } from '@casl/ability';
 import { usePinnedItems } from '../hooks/pinning/usePinnedItems';
-import {
-    useOnboardingStatus,
-    useProjectSavedChartStatus,
-} from '../hooks/useOnboardingStatus';
+import { useOnboardingStatus } from '../hooks/useOnboardingStatus';
 import {
     useMostPopularAndRecentlyUpdated,
     useProject,
 } from '../hooks/useProject';
-import { useApp } from '../providers/AppProvider';
-import { PinnedItemsProvider } from '../providers/PinnedItemsProvider';
+import useApp from '../providers/App/useApp';
+import { PinnedItemsProvider } from '../providers/PinnedItems/PinnedItemsProvider';
 
 const Home: FC = () => {
     const params = useParams<{ projectUuid: string }>();
     const selectedProjectUuid = params.projectUuid;
-    const savedChartStatus = useProjectSavedChartStatus(selectedProjectUuid);
     const project = useProject(selectedProjectUuid);
     const onboarding = useOnboardingStatus();
-
-    const { data: pinnedItems = [], isLoading: pinnedItemsLoading } =
-        usePinnedItems(selectedProjectUuid, project.data?.pinnedListUuid);
-
+    const pinnedItems = usePinnedItems(
+        selectedProjectUuid,
+        project.data?.pinnedListUuid,
+    );
     const {
         data: mostPopularAndRecentlyUpdated,
-        isLoading: isMostPopularAndRecentlyUpdatedLoading,
+        isInitialLoading: isMostPopularAndRecentlyUpdatedLoading,
     } = useMostPopularAndRecentlyUpdated(selectedProjectUuid);
 
     const { user } = useApp();
 
     const isLoading =
-        onboarding.isLoading ||
-        project.isLoading ||
-        savedChartStatus.isLoading ||
+        onboarding.isInitialLoading ||
+        project.isInitialLoading ||
         isMostPopularAndRecentlyUpdatedLoading ||
-        pinnedItemsLoading;
-    const error = onboarding.error || project.error || savedChartStatus.error;
+        pinnedItems.isInitialLoading;
+
+    const error = onboarding.error || project.error;
 
     useUnmount(() => onboarding.remove());
-
-    if (user.data?.ability?.cannot('view', 'SavedChart')) {
-        return <ForbiddenPanel />;
-    }
 
     if (isLoading) {
         return <PageSpinner />;
@@ -64,6 +57,10 @@ const Home: FC = () => {
 
     if (!project.data || !onboarding.data) {
         return <ErrorState />;
+    }
+
+    if (user.data?.ability?.cannot('view', subject('Project', project.data))) {
+        return <ForbiddenPanel />;
     }
 
     return (
@@ -84,9 +81,10 @@ const Home: FC = () => {
                             organizationUuid={project.data.organizationUuid}
                             projectUuid={project.data.projectUuid}
                             pinnedListUuid={project.data.pinnedListUuid || ''}
+                            allowDelete={false}
                         >
                             <PinnedItemsPanel
-                                pinnedItems={pinnedItems}
+                                pinnedItems={pinnedItems.data ?? []}
                                 isEnabled={Boolean(
                                     mostPopularAndRecentlyUpdated?.mostPopular
                                         .length ||

@@ -1,6 +1,9 @@
-import { SpaceDashboard } from './dashboard';
-import { ProjectMemberRole } from './projectMemberProfile';
-import { SpaceQuery } from './savedCharts';
+// eslint-disable-next-line import/no-cycle
+import { type SpaceDashboard } from './dashboard';
+import { type OrganizationMemberRole } from './organizationMemberProfile';
+import { type ProjectMemberRole } from './projectMemberRole';
+// eslint-disable-next-line import/no-cycle
+import { type SpaceQuery } from './savedCharts';
 
 export type Space = {
     organizationUuid: string;
@@ -10,9 +13,11 @@ export type Space = {
     queries: SpaceQuery[];
     projectUuid: string;
     dashboards: SpaceDashboard[];
-    access: SpaceShare[] | undefined;
+    access: SpaceShare[];
+    groupsAccess: SpaceGroup[];
     pinnedListUuid: string | null;
     pinnedListOrder: number | null;
+    slug: string;
 };
 
 export type SpaceSummary = Pick<
@@ -24,7 +29,9 @@ export type SpaceSummary = Pick<
     | 'isPrivate'
     | 'pinnedListUuid'
     | 'pinnedListOrder'
+    | 'slug'
 > & {
+    userAccess: SpaceShare | undefined;
     access: string[];
     chartCount: number;
     dashboardCount: number;
@@ -33,7 +40,7 @@ export type SpaceSummary = Pick<
 export type CreateSpace = {
     name: string;
     isPrivate?: boolean;
-    access?: Pick<SpaceShare, 'userUuid'>[];
+    access?: Pick<SpaceShare, 'userUuid' | 'role'>[];
 };
 
 export type UpdateSpace = {
@@ -45,8 +52,30 @@ export type SpaceShare = {
     userUuid: string;
     firstName: string;
     lastName: string;
-    role: ProjectMemberRole;
+    email: string;
+    role: SpaceMemberRole;
+    hasDirectAccess: boolean;
+    projectRole: ProjectMemberRole | undefined;
+    inheritedRole: OrganizationMemberRole | ProjectMemberRole | undefined;
+    inheritedFrom:
+        | 'organization'
+        | 'project'
+        | 'group'
+        | 'space_group'
+        | undefined;
 };
+
+export type SpaceGroup = {
+    groupUuid: string;
+    groupName: string;
+    spaceRole: SpaceMemberRole;
+};
+
+export enum SpaceMemberRole {
+    VIEWER = 'viewer',
+    EDITOR = 'editor',
+    ADMIN = 'admin',
+}
 
 export type ApiSpaceSummaryListResponse = {
     status: 'ok';
@@ -58,6 +87,12 @@ export type ApiSpaceResponse = {
     results: Space;
 };
 
-export type AddSpaceShare = {
+export type AddSpaceUserAccess = {
     userUuid: string;
+    spaceRole: SpaceMemberRole;
+};
+
+export type AddSpaceGroupAccess = {
+    groupUuid: string;
+    spaceRole: SpaceMemberRole;
 };

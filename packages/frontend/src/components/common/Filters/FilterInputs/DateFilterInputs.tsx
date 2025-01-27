@@ -1,20 +1,20 @@
 import {
-    ConditionalRule,
-    DateFilterRule,
     DimensionType,
     FilterOperator,
     formatDate,
-    formatTimestamp,
+    isCustomSqlDimension,
     isDimension,
-    isField,
     isFilterRule,
     parseDate,
-    parseTimestamp,
     TimeFrames,
+    timeframeToUnitOfTime,
+    type ConditionalRule,
+    type DateFilterRule,
 } from '@lightdash/common';
 import { Flex, NumberInput, Text } from '@mantine/core';
-import { FilterInputsProps } from '.';
-import { useFiltersContext } from '../FiltersProvider';
+import dayjs from 'dayjs';
+import { type FilterInputsProps } from '.';
+import useFiltersContext from '../useFiltersContext';
 import { getFirstDayOfWeek } from '../utils/filterDateUtils';
 import { getPlaceholderByFilterTypeAndOperator } from '../utils/getPlaceholderByFilterTypeAndOperator';
 import DefaultFilterInputs from './DefaultFilterInputs';
@@ -33,7 +33,8 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
     const { field, rule, onChange, popoverProps, disabled, filterType } = props;
     const { startOfWeek } = useFiltersContext();
     const isTimestamp =
-        isField(field) && field.type === DimensionType.TIMESTAMP;
+        (isCustomSqlDimension(field) ? field.dimensionType : field.type) ===
+        DimensionType.TIMESTAMP;
 
     if (!isFilterRule(rule)) {
         throw new Error('DateFilterInputs expects a FilterRule');
@@ -68,6 +69,7 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                                 <FilterWeekPicker
                                     placeholder={placeholder}
                                     disabled={disabled}
+                                    autoFocus={true}
                                     value={
                                         rule.values && rule.values[0]
                                             ? parseDate(
@@ -106,7 +108,10 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                         return (
                             <FilterMonthAndYearPicker
                                 disabled={disabled}
+                                // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                                // @ts-ignore
                                 placeholder={placeholder}
+                                autoFocus={true}
                                 popoverProps={popoverProps}
                                 value={
                                     rule.values && rule.values[0]
@@ -133,7 +138,11 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                         return (
                             <FilterYearPicker
                                 disabled={disabled}
+                                // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                                // @ts-ignore
                                 placeholder={placeholder}
+                                autoFocus={true}
+                                defaultOpened={true}
                                 popoverProps={popoverProps}
                                 value={
                                     rule.values && rule.values[0]
@@ -165,39 +174,32 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
             }
 
             if (isTimestamp) {
+                // For display only
+
+                let value =
+                    rule.values && rule.values[0]
+                        ? dayjs(rule?.values?.[0]).toDate()
+                        : dayjs().toDate(); // Create
+
                 return (
                     <FilterDateTimePicker
                         disabled={disabled}
+                        // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                        // @ts-ignore
                         placeholder={placeholder}
+                        autoFocus={true}
                         withSeconds
                         // FIXME: mantine v7
                         // mantine does not set the first day of the week based on the locale
                         // so we need to do it manually and always pass it as a prop
                         firstDayOfWeek={getFirstDayOfWeek(startOfWeek)}
                         popoverProps={popoverProps}
-                        value={
-                            rule.values
-                                ? parseTimestamp(
-                                      formatTimestamp(
-                                          rule.values[0],
-                                          TimeFrames.MILLISECOND,
-                                      ),
-                                      TimeFrames.MILLISECOND,
-                                  )
-                                : null
-                        }
-                        onChange={(value: Date | null) => {
+                        value={value}
+                        onChange={(v: Date | null) => {
                             onChange({
                                 ...rule,
-                                values:
-                                    value === null
-                                        ? []
-                                        : [
-                                              formatTimestamp(
-                                                  value,
-                                                  TimeFrames.MILLISECOND,
-                                              ),
-                                          ],
+                                // format as an ISO string, not for display
+                                values: v === null ? [] : [dayjs(v).format()],
                             });
                         }}
                     />
@@ -213,6 +215,7 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                     // so we need to do it manually and always pass it as a prop
                     firstDayOfWeek={getFirstDayOfWeek(startOfWeek)}
                     popoverProps={popoverProps}
+                    autoFocus={true}
                     value={
                         rule.values
                             ? parseDate(
@@ -242,6 +245,7 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                         sx={{ flexShrink: 1, flexGrow: 1 }}
                         placeholder={placeholder}
                         disabled={disabled}
+                        autoFocus={true}
                         value={isNaN(parsedValue) ? undefined : parsedValue}
                         min={0}
                         onChange={(value) => {
@@ -256,6 +260,11 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                         disabled={disabled}
                         sx={{ flexShrink: 0, flexGrow: 3 }}
                         isTimestamp={isTimestamp}
+                        minUnitOfTime={
+                            isDimension(field) && field.timeInterval
+                                ? timeframeToUnitOfTime(field.timeInterval)
+                                : undefined
+                        }
                         unitOfTime={rule.settings?.unitOfTime}
                         completed={rule.settings?.completed || false}
                         withinPortal={popoverProps?.withinPortal}
@@ -274,14 +283,21 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                 </Flex>
             );
         case FilterOperator.IN_THE_CURRENT:
+        case FilterOperator.NOT_IN_THE_CURRENT:
             return (
                 <FilterUnitOfTimeAutoComplete
                     w="100%"
                     disabled={disabled}
                     isTimestamp={isTimestamp}
                     unitOfTime={rule.settings?.unitOfTime}
+                    minUnitOfTime={
+                        isDimension(field) && field.timeInterval
+                            ? timeframeToUnitOfTime(field.timeInterval)
+                            : undefined
+                    }
                     showOptionsInPlural={false}
                     showCompletedOptions={false}
+                    autoFocus={true}
                     completed={false}
                     withinPortal={popoverProps?.withinPortal}
                     onDropdownOpen={popoverProps?.onOpen}
@@ -302,24 +318,13 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                 return (
                     <FilterDateTimeRangePicker
                         disabled={disabled}
+                        autoFocus={true}
                         firstDayOfWeek={getFirstDayOfWeek(startOfWeek)}
                         value={
                             rule.values && rule.values[0] && rule.values[1]
                                 ? [
-                                      parseTimestamp(
-                                          formatTimestamp(
-                                              rule.values[0],
-                                              TimeFrames.MILLISECOND,
-                                          ),
-                                          TimeFrames.MILLISECOND,
-                                      ),
-                                      parseTimestamp(
-                                          formatTimestamp(
-                                              rule.values[1],
-                                              TimeFrames.MILLISECOND,
-                                          ),
-                                          TimeFrames.MILLISECOND,
-                                      ),
+                                      dayjs(rule.values[0]).toDate(),
+                                      dayjs(rule.values[1]).toDate(),
                                   ]
                                 : null
                         }
@@ -329,14 +334,8 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
                                 ...rule,
                                 values: value
                                     ? [
-                                          formatTimestamp(
-                                              value[0],
-                                              TimeFrames.MILLISECOND,
-                                          ),
-                                          formatTimestamp(
-                                              value[1],
-                                              TimeFrames.MILLISECOND,
-                                          ),
+                                          dayjs(value[0]).format(),
+                                          dayjs(value[1]).format(),
                                       ]
                                     : [],
                             });
@@ -348,6 +347,7 @@ const DateFilterInputs = <T extends ConditionalRule = DateFilterRule>(
             return (
                 <FilterDateRangePicker
                     disabled={disabled}
+                    autoFocus={true}
                     firstDayOfWeek={getFirstDayOfWeek(startOfWeek)}
                     value={
                         rule.values && rule.values[0] && rule.values[1]

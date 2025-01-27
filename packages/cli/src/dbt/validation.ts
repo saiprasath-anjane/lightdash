@@ -8,9 +8,9 @@ import {
     ManifestValidator,
     normaliseModelDatabase,
     SupportedDbtAdapter,
+    type DbtManifestVersion,
 } from '@lightdash/common';
 import GlobalState from '../globalState';
-import { getDbtManifest } from './manifest';
 
 type DbtModelsGroupedByState = {
     valid: DbtModelNode[];
@@ -19,10 +19,10 @@ type DbtModelsGroupedByState = {
 };
 export const validateDbtModel = async (
     adapterType: string,
+    manifestVersion: DbtManifestVersion,
     models: DbtRawModelNode[],
 ): Promise<DbtModelsGroupedByState> => {
     GlobalState.debug(`> Validating ${models.length} models from dbt manifest`);
-    const manifestVersion = await getDbtManifest();
 
     GlobalState.debug(
         `> Validating models using dbt manifest version ${manifestVersion}`,
@@ -31,10 +31,6 @@ export const validateDbtModel = async (
     const validator = new ManifestValidator(manifestVersion);
     const results = models.reduce<DbtModelsGroupedByState>(
         (acc, model) => {
-            if (model.compiled === undefined) {
-                return { ...acc, skipped: [...acc.skipped, model] };
-            }
-
             let error: InlineError | undefined;
             // Match against json schema
             const [isValid, errorMessage] = validator.isModelValid(model);

@@ -1,4 +1,4 @@
-import { Button, Center, Loader, Menu } from '@mantine/core';
+import { Box, Button, Center, Loader, Menu, ScrollArea } from '@mantine/core';
 import {
     IconCategory,
     IconChartAreaLine,
@@ -6,22 +6,30 @@ import {
     IconFolders,
     IconLayoutDashboard,
 } from '@tabler/icons-react';
-import { FC } from 'react';
-import { Link } from 'react-router-dom';
-
+import { type FC } from 'react';
+import { Link } from 'react-router';
+import { useHasMetricsInCatalog } from '../../features/metricsCatalog/hooks/useMetricsCatalog';
 import { useSpaceSummaries } from '../../hooks/useSpaces';
 import MantineIcon from '../common/MantineIcon';
+import { MetricsLink } from './MetricsLink';
 
 interface Props {
     projectUuid: string;
 }
 
 const BrowseMenu: FC<Props> = ({ projectUuid }) => {
-    const { data: spaces, isLoading } = useSpaceSummaries(projectUuid);
+    const { data: spaces, isInitialLoading } = useSpaceSummaries(
+        projectUuid,
+        true,
+    );
+    const { data: hasMetrics } = useHasMetricsInCatalog({
+        projectUuid,
+    });
 
     return (
         <Menu
             withArrow
+            withinPortal
             shadow="lg"
             position="bottom-start"
             arrowOffset={16}
@@ -32,7 +40,9 @@ const BrowseMenu: FC<Props> = ({ projectUuid }) => {
                     variant="default"
                     size="xs"
                     fz="sm"
-                    leftIcon={<MantineIcon icon={IconCategory} />}
+                    leftIcon={
+                        <MantineIcon color="#adb5bd" icon={IconCategory} />
+                    }
                 >
                     Browse
                 </Button>
@@ -63,12 +73,16 @@ const BrowseMenu: FC<Props> = ({ projectUuid }) => {
                     All saved charts
                 </Menu.Item>
 
-                {isLoading || (spaces && spaces.length > 0) ? (
+                {!hasMetrics && (
+                    <MetricsLink projectUuid={projectUuid} asMenu />
+                )}
+
+                {isInitialLoading || (spaces && spaces.length > 0) ? (
                     <>
                         <Menu.Divider />
                         <Menu.Label>Spaces</Menu.Label>
 
-                        {isLoading ? (
+                        {isInitialLoading ? (
                             <Center my="sm">
                                 <Loader size="sm" color="gray" />
                             </Center>
@@ -76,18 +90,27 @@ const BrowseMenu: FC<Props> = ({ projectUuid }) => {
                     </>
                 ) : null}
 
-                {spaces
-                    ?.sort((a, b) => a.name.localeCompare(b.name))
-                    .map((space) => (
-                        <Menu.Item
-                            key={space.uuid}
-                            component={Link}
-                            to={`/projects/${projectUuid}/spaces/${space.uuid}`}
-                            icon={<MantineIcon icon={IconFolder} />}
-                        >
-                            {space.name}
-                        </Menu.Item>
-                    ))}
+                <ScrollArea
+                    variant="primary"
+                    className="only-vertical"
+                    scrollbarSize={6}
+                    type="hover"
+                >
+                    <Box mah={300}>
+                        {spaces
+                            ?.sort((a, b) => a.name.localeCompare(b.name))
+                            .map((space) => (
+                                <Menu.Item
+                                    key={space.uuid}
+                                    component={Link}
+                                    to={`/projects/${projectUuid}/spaces/${space.uuid}`}
+                                    icon={<MantineIcon icon={IconFolder} />}
+                                >
+                                    {space.name}
+                                </Menu.Item>
+                            ))}
+                    </Box>
+                </ScrollArea>
             </Menu.Dropdown>
         </Menu>
     );

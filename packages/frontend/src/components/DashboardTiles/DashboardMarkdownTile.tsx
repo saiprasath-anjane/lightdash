@@ -1,24 +1,62 @@
-import { DashboardMarkdownTile } from '@lightdash/common';
+import { type DashboardMarkdownTile } from '@lightdash/common';
 import MDEditor from '@uiw/react-md-editor';
-import React, { FC } from 'react';
+import React, { useMemo, useState, type FC } from 'react';
+import rehypeExternalLinks from 'rehype-external-links';
+import { DashboardTileComments } from '../../features/comments';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import { MarkdownWrapper } from './DashboardMarkdownTile.styles';
 import TileBase from './TileBase/index';
 
 type Props = Pick<
     React.ComponentProps<typeof TileBase>,
     'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
-> & { tile: DashboardMarkdownTile };
+> & {
+    tile: DashboardMarkdownTile;
+};
 
 const MarkdownTile: FC<Props> = (props) => {
     const {
         tile: {
             properties: { title, content },
+            uuid,
         },
     } = props;
+
+    const [isCommentsMenuOpen, setIsCommentsMenuOpen] = useState(false);
+    const showComments = useDashboardContext(
+        (c) => c.dashboardCommentsCheck?.canViewDashboardComments,
+    );
+    const tileHasComments = useDashboardContext((c) => c.hasTileComments(uuid));
+    const dashboardComments = useMemo(
+        () =>
+            !!showComments && (
+                <DashboardTileComments
+                    opened={isCommentsMenuOpen}
+                    onOpen={() => setIsCommentsMenuOpen(true)}
+                    onClose={() => setIsCommentsMenuOpen(false)}
+                    dashboardTileUuid={props.tile.uuid}
+                />
+            ),
+        [showComments, isCommentsMenuOpen, props.tile.uuid],
+    );
+
     return (
-        <TileBase title={title} {...props}>
+        <TileBase
+            title={title}
+            lockHeaderVisibility={isCommentsMenuOpen}
+            visibleHeaderElement={
+                tileHasComments ? dashboardComments : undefined
+            }
+            extraHeaderElement={tileHasComments ? undefined : dashboardComments}
+            {...props}
+        >
             <MarkdownWrapper className="non-draggable">
-                <MDEditor.Markdown source={content} linkTarget="_blank" />
+                <MDEditor.Markdown
+                    source={content}
+                    rehypePlugins={[
+                        [rehypeExternalLinks, { target: '_blank' }],
+                    ]}
+                />
             </MarkdownWrapper>
         </TileBase>
     );

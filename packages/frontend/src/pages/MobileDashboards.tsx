@@ -1,23 +1,24 @@
 import {
-    ResourceViewItem,
     ResourceViewItemType,
     wrapResourceView,
+    type ResourceViewItem,
 } from '@lightdash/common';
 import { ActionIcon, Group, Stack, TextInput } from '@mantine/core';
 import { IconLayoutDashboard, IconSearch, IconX } from '@tabler/icons-react';
 import Fuse from 'fuse.js';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import LoadingState from '../components/common/LoadingState';
 import MantineIcon from '../components/common/MantineIcon';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import ResourceView from '../components/common/ResourceView';
-import { SortDirection } from '../components/common/ResourceView/ResourceViewList';
+import { ResourceSortDirection } from '../components/common/ResourceView/types';
 import { useDashboards } from '../hooks/dashboard/useDashboards';
 
 const MobileDashboards = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { isLoading, data: dashboards = [] } = useDashboards(projectUuid);
+    const { isInitialLoading, data: dashboards = [] } =
+        useDashboards(projectUuid);
     const [search, setSearch] = useState<string>('');
     const visibleItems = useMemo(() => {
         const items = wrapResourceView(
@@ -38,7 +39,7 @@ const MobileDashboards = () => {
         return items;
     }, [dashboards, search]);
 
-    if (isLoading) {
+    if (isInitialLoading) {
         return <LoadingState title="Loading dashboards" />;
     }
 
@@ -68,7 +69,7 @@ const MobileDashboards = () => {
             <ResourceView
                 items={visibleItems}
                 listProps={{
-                    defaultSort: { updatedAt: SortDirection.DESC },
+                    defaultSort: { updatedAt: ResourceSortDirection.DESC },
                     defaultColumnVisibility: {
                         space: false,
                         updatedAt: false,

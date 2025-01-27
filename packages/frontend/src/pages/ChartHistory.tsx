@@ -22,7 +22,7 @@ import {
     IconInfoCircle,
 } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { useHistory, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { Can } from '../components/common/Authorization';
 import { EmptyState } from '../components/common/EmptyState';
 import ErrorState from '../components/common/ErrorState';
@@ -36,23 +36,23 @@ import {
     useChartHistory,
     useChartVersion,
     useChartVersionRollbackMutation,
+    useSavedQuery,
 } from '../hooks/useSavedQuery';
-import { useApp } from '../providers/AppProvider';
-import {
-    ExplorerProvider,
-    ExplorerSection,
-} from '../providers/ExplorerProvider';
+import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
+import { ExplorerSection } from '../providers/Explorer/types';
 import NoTableIcon from '../svgs/emptystate-no-table.svg?react';
 
 const ChartHistory = () => {
-    const history = useHistory();
-    const { user } = useApp();
+    const navigate = useNavigate();
     const { savedQueryUuid, projectUuid } = useParams<{
         savedQueryUuid: string;
         projectUuid: string;
     }>();
     const [selectedVersionUuid, selectVersionUuid] = useState<string>();
     const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
+    const chartQuery = useSavedQuery({
+        id: savedQueryUuid,
+    });
     const historyQuery = useChartHistory(savedQueryUuid);
 
     useEffect(() => {
@@ -74,21 +74,25 @@ const ChartHistory = () => {
 
     const rollbackMutation = useChartVersionRollbackMutation(savedQueryUuid, {
         onSuccess: () => {
-            history.push(
+            void navigate(
                 `/projects/${projectUuid}/saved/${savedQueryUuid}/view`,
             );
         },
     });
 
-    if (historyQuery.isLoading) {
+    if (historyQuery.isInitialLoading || chartQuery.isInitialLoading) {
         return (
             <div style={{ marginTop: '20px' }}>
                 <SuboptimalState title="Loading..." loading />
             </div>
         );
     }
-    if (historyQuery.error) {
-        return <ErrorState error={historyQuery.error.error} />;
+    if (historyQuery.error || chartQuery.error) {
+        return (
+            <ErrorState
+                error={historyQuery.error?.error || chartQuery.error?.error}
+            />
+        );
     }
 
     return (
@@ -156,10 +160,7 @@ const ChartHistory = () => {
                                                     this={subject(
                                                         'SavedChart',
                                                         {
-                                                            organizationUuid:
-                                                                user.data
-                                                                    ?.organizationUuid,
-                                                            projectUuid,
+                                                            ...chartQuery.data,
                                                         },
                                                     )}
                                                 >
@@ -258,6 +259,9 @@ const ChartHistory = () => {
                         expandedSections: [ExplorerSection.VISUALIZATION],
                         unsavedChartVersion: chartVersionQuery.data.chart,
                         modals: {
+                            format: {
+                                isOpen: false,
+                            },
                             additionalMetric: {
                                 isOpen: false,
                             },

@@ -2,14 +2,18 @@ import {
     assertUnreachable,
     DbtProjectType,
     DbtProjectTypeLabels,
+    DbtVersionOptionLatest,
     DefaultSupportedDbtVersion,
+    FeatureFlags,
+    getLatestSupportDbtVersion,
     SupportedDbtVersions,
     WarehouseTypes,
 } from '@lightdash/common';
-import { Select, Stack, TextInput } from '@mantine/core';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { Anchor, Select, Stack, TextInput } from '@mantine/core';
+import { useEffect, useMemo, useState, type FC } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
-import { useApp } from '../../providers/AppProvider';
+import { useFeatureFlagEnabled } from '../../hooks/useFeatureFlagEnabled';
+import useApp from '../../providers/App/useApp';
 import FormSection from '../ReactHookForm/FormSection';
 import { MultiKeyValuePairsInput } from '../ReactHookForm/MultiKeyValuePairsInput';
 import AzureDevOpsForm from './DbtForms/AzureDevOpsForm';
@@ -20,7 +24,7 @@ import DbtNoneForm from './DbtForms/DbtNoneForm';
 import GithubForm from './DbtForms/GithubForm';
 import GitlabForm from './DbtForms/GitlabForm';
 import FormCollapseButton from './FormCollapseButton';
-import { SelectedWarehouse } from './ProjectConnectFlow/SelectWarehouse';
+import { type SelectedWarehouse } from './ProjectConnectFlow/types';
 import { BigQuerySchemaInput } from './WarehouseForms/BigQueryForm';
 import { DatabricksSchemaInput } from './WarehouseForms/DatabricksForm';
 import { PostgresSchemaInput } from './WarehouseForms/PostgresForm';
@@ -53,6 +57,9 @@ const DbtSettingsForm: FC<DbtSettingsFormProps> = ({
     const toggleAdvancedSettingsOpen = () =>
         setIsAdvancedSettingsOpen((open) => !open);
     const { health } = useApp();
+    const isEnabled = useFeatureFlagEnabled(
+        FeatureFlags.ShowDbtCloudProjectOption,
+    );
     const options = useMemo(() => {
         const enabledTypes = [
             DbtProjectType.GITHUB,
@@ -64,7 +71,7 @@ const DbtSettingsForm: FC<DbtSettingsFormProps> = ({
         if (health.data?.localDbtEnabled) {
             enabledTypes.push(DbtProjectType.DBT);
         }
-        if (type === DbtProjectType.DBT_CLOUD_IDE) {
+        if (isEnabled || type === DbtProjectType.DBT_CLOUD_IDE) {
             enabledTypes.push(DbtProjectType.DBT_CLOUD_IDE);
         }
 
@@ -72,7 +79,7 @@ const DbtSettingsForm: FC<DbtSettingsFormProps> = ({
             value,
             label: DbtProjectTypeLabels[value],
         }));
-    }, [health, type]);
+    }, [isEnabled, health, type]);
 
     useEffect(() => {
         // Reset field validation from github form
@@ -175,12 +182,18 @@ const DbtSettingsForm: FC<DbtSettingsFormProps> = ({
                     render={({ field }) => (
                         <Select
                             label="dbt version"
-                            data={Object.values(SupportedDbtVersions).map(
-                                (version) => ({
-                                    value: version,
-                                    label: version,
-                                }),
-                            )}
+                            data={[
+                                {
+                                    value: DbtVersionOptionLatest.LATEST,
+                                    label: `latest (${getLatestSupportDbtVersion()})`,
+                                },
+                                ...Object.values(SupportedDbtVersions)
+                                    .reverse()
+                                    .map((version) => ({
+                                        value: version,
+                                        label: version,
+                                    })),
+                            ]}
                             value={field.value}
                             onChange={field.onChange}
                             disabled={disabled}
@@ -216,6 +229,30 @@ const DbtSettingsForm: FC<DbtSettingsFormProps> = ({
                             isOpen={isAdvancedSettingsOpen}
                         >
                             <Stack style={{ marginTop: '8px' }}>
+                                {type !== DbtProjectType.DBT_CLOUD_IDE && (
+                                    <TextInput
+                                        {...register('dbt.selector')}
+                                        label="dbt selector"
+                                        description={
+                                            <p>
+                                                Add dbt selectors to filter out
+                                                models from your dbt project.
+                                                You can see more details in{' '}
+                                                <Anchor
+                                                    href="https://docs.lightdash.com/get-started/setup-lightdash/connect-project/#dbt-selector"
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                >
+                                                    our docs
+                                                </Anchor>
+                                                .
+                                            </p>
+                                        }
+                                        disabled={disabled}
+                                        placeholder="tag:lightdash"
+                                    />
+                                )}
+
                                 <MultiKeyValuePairsInput
                                     name="dbt.environment"
                                     label="Environment variables"

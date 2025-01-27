@@ -48,13 +48,13 @@ describe('Download CSV on SQL Runner', () => {
             find.forEach((text) => cy.findAllByText(text));
             cy.contains('Page 1 of 3');
 
-            cy.findByTestId('Charts-card-expand').click();
+            cy.get('[data-testid=Chart-card-expand]').click();
             cy.findByText('Configure').click();
             cy.findByText('Bar chart').click();
 
             cy.findByText('Table').click();
 
-            cy.findByTestId('export-csv-button').click();
+            cy.get('[data-testid=export-csv-button]').click();
 
             cy.wait('@apiDownloadCsv').then((interception) => {
                 expect(interception?.response?.statusCode).to.eq(200);
@@ -86,18 +86,18 @@ describe('Download CSV on Dashboards', () => {
         'Should download a CSV from dashboard',
         { retries: 3, pageLoadTimeout: 1000 },
         () => {
-            const downloadUrl = `/api/v1/projects/${SEED_PROJECT.project_uuid}/explores/payments/downloadCsv`;
+            const downloadUrl = `/api/v1/saved/*/downloadCsv`;
             cy.intercept({
                 method: 'POST',
                 url: downloadUrl,
             }).as('apiDownloadCsv');
 
-            // wiat for the dashboard to load
+            // wait for the dashboard to load
             cy.findByText('Loading dashboards').should('not.exist');
 
             cy.contains('a', 'Jaffle dashboard').click();
 
-            cy.findAllByText('Loading chart').should('have.length', 0); // Finish loading
+            cy.findByTestId('page-spinner').should('not.exist');
 
             cy.findAllByText('No chart available').should('have.length', 0);
             cy.findAllByText('No data available').should('have.length', 0);
@@ -132,6 +132,8 @@ describe('Download CSV on Explore', () => {
         cy.visit(`/projects/${SEED_PROJECT.project_uuid}/tables`, {
             timeout: 60000,
         });
+
+        cy.findByTestId('page-spinner').should('not.exist');
     });
 
     it(
@@ -153,10 +155,11 @@ describe('Download CSV on Explore', () => {
             cy.get('button').contains('Run query').click();
 
             // wait for the chart to finish loading
+            cy.findByText('Loading chart').should('not.exist');
             cy.findByText('Loading results').should('not.exist');
 
-            cy.findByTestId('export-csv-button').click();
-            cy.findByTestId('chart-export-csv-button').click();
+            cy.get('[data-testid=export-csv-button]').eq(1).click();
+            cy.get('[data-testid=chart-export-csv-button]').click();
 
             cy.findByText('Export CSV').click();
 
@@ -179,6 +182,9 @@ describe('Download CSV on Explore', () => {
                 method: 'POST',
                 url: downloadUrl,
             }).as('apiDownloadCsv');
+
+            cy.findByTestId('page-spinner').should('not.exist');
+
             // choose table and select fields
             cy.findByText('Orders').click();
             cy.findByText('Customers').click();
@@ -189,20 +195,19 @@ describe('Download CSV on Explore', () => {
             cy.get('button').contains('Run query').click();
 
             // open chart
-            cy.findByTestId('Charts-card-expand').click();
+            cy.findByTestId('Chart-card-expand').click();
             // Close results
-            cy.findByTestId('Results-card-expand').click();
-            // wait for the chart to finish loading
-            cy.findByText('Loading chart').should('not.exist');
+            cy.get('[data-testid=Results-card-expand]').click();
 
             // open chart menu and change chart type to Table
+            cy.get('[data-testid=Chart-card-expand]').click();
             cy.findByText('Configure').click();
             cy.get('button').contains('Bar chart').click();
             cy.get('[role="menuitem"]').contains('Table').click();
 
             // find by role and text
-            cy.findByTestId('export-csv-button').click();
-            cy.findByTestId('chart-export-csv-button').click();
+            cy.get('[data-testid=export-csv-button]').click();
+            cy.get('[data-testid=chart-export-csv-button]').click();
 
             cy.wait('@apiDownloadCsv').then((interception) => {
                 expect(interception?.response?.statusCode).to.eq(200);

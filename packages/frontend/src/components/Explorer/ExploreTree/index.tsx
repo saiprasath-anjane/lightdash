@@ -1,18 +1,18 @@
 import {
-    AdditionalMetric,
-    CompiledTable,
-    CustomDimension,
-    Dimension,
-    Explore,
     getItemId,
-    Metric,
+    type AdditionalMetric,
+    type CompiledTable,
+    type CustomDimension,
+    type Dimension,
+    type Explore,
+    type Metric,
 } from '@lightdash/common';
-import { ActionIcon, Box, Center, Text, TextInput } from '@mantine/core';
+import { ActionIcon, Center, ScrollArea, Text, TextInput } from '@mantine/core';
 import { IconSearch, IconX } from '@tabler/icons-react';
-import { FC, useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type FC } from 'react';
 import MantineIcon from '../../common/MantineIcon';
 import TableTree from './TableTree';
-import { getSearchResults } from './TableTree/Tree/TreeProvider';
+import { getSearchResults } from './TableTree/Tree/utils';
 
 type ExploreTreeProps = {
     explore: Explore;
@@ -20,6 +20,12 @@ type ExploreTreeProps = {
     onSelectedFieldChange: (fieldId: string, isDimension: boolean) => void;
     selectedNodes: Set<string>;
     customDimensions?: CustomDimension[];
+    selectedDimensions?: string[];
+    missingFields?: {
+        all: string[];
+        customDimensions: CustomDimension[] | undefined;
+        customMetrics: AdditionalMetric[] | undefined;
+    };
 };
 
 type Records = Record<string, AdditionalMetric | Dimension | Metric>;
@@ -30,6 +36,8 @@ const ExploreTree: FC<ExploreTreeProps> = ({
     selectedNodes,
     onSelectedFieldChange,
     customDimensions,
+    selectedDimensions,
+    missingFields,
 }) => {
     const [search, setSearch] = useState<string>('');
     const isSearching = !!search && search !== '';
@@ -66,13 +74,6 @@ const ExploreTree: FC<ExploreTreeProps> = ({
             );
     }, [explore, searchHasResults, isSearching]);
 
-    const missingCustomMetrics = useMemo(() => {
-        const allTables = Object.keys(explore.tables);
-        return additionalMetrics.filter(
-            (metric) => !allTables.includes(metric.table),
-        );
-    }, [explore, additionalMetrics]);
-
     return (
         <>
             <TextInput
@@ -89,7 +90,12 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                 onChange={(e) => setSearch(e.target.value)}
             />
 
-            <Box style={{ flexGrow: 1, overflowY: 'auto' }}>
+            <ScrollArea
+                variant="primary"
+                className="only-vertical"
+                offsetScrollbars
+                scrollbarSize={8}
+            >
                 {tableTrees.length > 0 ? (
                     tableTrees.map((table, index) => (
                         <TableTree
@@ -105,10 +111,19 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                             onSelectedNodeChange={onSelectedFieldChange}
                             customDimensions={customDimensions}
                             missingCustomMetrics={
-                                table.name === explore.baseTable
-                                    ? missingCustomMetrics
+                                table.name === explore.baseTable &&
+                                missingFields?.customMetrics
+                                    ? missingFields.customMetrics
                                     : []
                             }
+                            missingCustomDimensions={
+                                table.name === explore.baseTable &&
+                                missingFields?.customDimensions
+                                    ? missingFields.customDimensions
+                                    : []
+                            }
+                            missingFields={missingFields}
+                            selectedDimensions={selectedDimensions}
                         />
                     ))
                 ) : (
@@ -116,7 +131,7 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                         <Text color="dimmed">No fields found...</Text>
                     </Center>
                 )}
-            </Box>
+            </ScrollArea>
         </>
     );
 };

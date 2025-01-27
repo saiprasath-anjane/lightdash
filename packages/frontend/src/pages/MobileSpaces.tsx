@@ -1,39 +1,38 @@
 import { subject } from '@casl/ability';
 import {
-    ResourceViewItem,
     ResourceViewItemType,
     spaceToResourceViewItem,
     wrapResourceView,
+    type ResourceViewItem,
 } from '@lightdash/common';
 import { ActionIcon, Group, Stack, TextInput } from '@mantine/core';
 import { IconFolders, IconSearch, IconX } from '@tabler/icons-react';
 import Fuse from 'fuse.js';
-import { FC, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useMemo, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import LoadingState from '../components/common/LoadingState';
 import MantineIcon from '../components/common/MantineIcon';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import ResourceView from '../components/common/ResourceView';
-import { SortDirection } from '../components/common/ResourceView/ResourceViewList';
+import { ResourceSortDirection } from '../components/common/ResourceView/types';
 import ForbiddenPanel from '../components/ForbiddenPanel';
 import { useProject } from '../hooks/useProject';
 import { useSpaceSummaries } from '../hooks/useSpaces';
-import { useApp } from '../providers/AppProvider';
+import useApp from '../providers/App/useApp';
 
 const MobileSpaces: FC = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { data: spaces = [], isLoading: spaceIsLoading } = useSpaceSummaries(
-        projectUuid,
-        true,
-    );
+    const { data: spaces = [], isInitialLoading: spaceIsLoading } =
+        useSpaceSummaries(projectUuid, true);
     const project = useProject(projectUuid);
-    const isLoading = spaceIsLoading || project.isLoading;
+    const isLoading = spaceIsLoading || project.isInitialLoading;
     const { user } = useApp();
     const userCannotViewSpace = user.data?.ability?.cannot(
         'view',
         subject('Space', {
             organizationUuid: user.data?.organizationUuid,
             projectUuid,
+            isPrivate: false,
         }),
     );
     const [search, setSearch] = useState<string>('');
@@ -91,7 +90,7 @@ const MobileSpaces: FC = () => {
                 <ResourceView
                     items={visibleItems}
                     listProps={{
-                        defaultSort: { updatedAt: SortDirection.DESC },
+                        defaultSort: { updatedAt: ResourceSortDirection.DESC },
                         defaultColumnVisibility: {
                             space: false,
                             updatedAt: false,

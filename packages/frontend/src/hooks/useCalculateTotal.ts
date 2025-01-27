@@ -1,18 +1,18 @@
 import {
-    ApiCalculateTotalResponse,
-    ApiError,
-    CalculateTotalFromQuery,
-    DashboardFilters,
-    fieldId as getFieldId,
+    getItemId,
     isField,
     isMetric,
-    ItemsMap,
-    MetricQuery,
-    MetricQueryRequest,
+    type ApiCalculateTotalResponse,
+    type ApiError,
+    type CalculateTotalFromQuery,
+    type DashboardFilters,
+    type ItemsMap,
+    type MetricQuery,
+    type MetricQueryRequest,
 } from '@lightdash/common';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { useQuery } from 'react-query';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { lightdashApi } from '../api';
 import {
     convertDateDashboardFilters,
@@ -75,7 +75,7 @@ const getCalculationColumnFields = (
         .filter((item) => isField(item) && isMetric(item));
 
     return items?.reduce<string[]>((acc, item) => {
-        if (isField(item)) return [...acc, getFieldId(item)];
+        if (isField(item)) return [...acc, getItemId(item)];
         return acc;
     }, []);
 };
@@ -125,7 +125,9 @@ export const useCalculateTotal = ({
                       dashboardFilters,
                       invalidateCache,
                   )
-                : calculateTotalFromQuery(projectUuid, metricQuery, explore),
+                : projectUuid
+                ? calculateTotalFromQuery(projectUuid, metricQuery, explore)
+                : Promise.reject(),
         retry: false,
         enabled:
             metricsWithTotals.length > 0 &&

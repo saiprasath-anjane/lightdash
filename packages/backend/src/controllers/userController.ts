@@ -2,20 +2,25 @@ import {
     ApiEmailStatusResponse,
     ApiErrorPayload,
     ApiGetAuthenticatedUserResponse,
+    ApiGetLoginOptionsResponse,
     ApiRegisterUserResponse,
     ApiSuccessEmpty,
     ApiUserAllowedOrganizationsResponse,
+    LoginOptions,
     ParameterError,
+    PersonalAccessTokenWithToken,
     RegisterOrActivateUser,
+    UpsertUserWarehouseCredentials,
+    UserWarehouseCredentials,
     validatePassword,
 } from '@lightdash/common';
 import {
     Body,
-    Controller,
     Delete,
     Get,
     Middlewares,
     OperationId,
+    Patch,
     Path,
     Post,
     Put,
@@ -23,22 +28,22 @@ import {
     Request,
     Response,
     Route,
+    SuccessResponse,
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
-import { userModel } from '../models/models';
 import { UserModel } from '../models/UserModel';
-import { userService } from '../services/services';
 import {
     allowApiKeyAuthentication,
     isAuthenticated,
     unauthorisedInDemo,
 } from './authentication';
+import { BaseController } from './baseController';
 
 @Route('/api/v1/user')
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('My Account')
-export class UserController extends Controller {
+export class UserController extends BaseController {
     /**
      * Get authenticated user
      * @param req express request
@@ -50,6 +55,7 @@ export class UserController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiGetAuthenticatedUserResponse> {
         this.setStatus(200);
+
         return {
             status: 'ok',
             results: UserModel.lightdashUserFromSession(req.user!),
@@ -74,7 +80,9 @@ export class UserController extends Controller {
                 'Password must contain at least 8 characters, 1 letter and 1 number or 1 special character',
             );
         }
-        const sessionUser = await userService.registerOrActivateUser(body);
+        const sessionUser = await this.services
+            .getUserService()
+            .registerOrActivateUser(body);
         return new Promise((resolve, reject) => {
             req.login(sessionUser, (err) => {
                 if (err) {
@@ -100,9 +108,9 @@ export class UserController extends Controller {
     async createEmailOneTimePasscode(
         @Request() req: express.Request,
     ): Promise<ApiEmailStatusResponse> {
-        const status = await userService.sendOneTimePasscodeToPrimaryEmail(
-            req.user!,
-        );
+        const status = await this.services
+            .getUserService()
+            .sendOneTimePasscodeToPrimaryEmail(req.user!);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -123,10 +131,9 @@ export class UserController extends Controller {
         @Query() passcode?: string,
     ): Promise<ApiEmailStatusResponse> {
         // Throws 404 error if not found
-        const status = await userService.getPrimaryEmailStatus(
-            req.user!,
-            passcode,
-        );
+        const status = await this.services
+            .getUserService()
+            .getPrimaryEmailStatus(req.user!, passcode);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -145,7 +152,9 @@ export class UserController extends Controller {
     async getOrganizationsUserCanJoin(
         @Request() req: express.Request,
     ): Promise<ApiUserAllowedOrganizationsResponse> {
-        const status = await userService.getAllowedOrganizations(req.user!);
+        const status = await this.services
+            .getUserService()
+            .getAllowedOrganizations(req.user!);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -170,10 +179,12 @@ export class UserController extends Controller {
         @Request() req: express.Request,
         @Path() organizationUuid: string,
     ): Promise<ApiSuccessEmpty> {
-        await userService.joinOrg(req.user!, organizationUuid);
-        const sessionUser = await userModel.findSessionUserByUUID(
-            req.user!.userUuid,
-        );
+        await this.services
+            .getUserService()
+            .joinOrg(req.user!, organizationUuid);
+        const sessionUser = await req.services
+            .getUserService()
+            .getSessionByUserUuid(req.user!.userUuid);
         await new Promise<void>((resolve, reject) => {
             req.login(sessionUser, (err) => {
                 if (err) {
@@ -199,11 +210,160 @@ export class UserController extends Controller {
     async deleteUser(
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
-        await userService.delete(req.user!, req.user!.userUuid);
+        await this.services
+            .getUserService()
+            .delete(req.user!, req.user!.userUuid);
+
+        await new Promise<void>((resolve, reject) => {
+            req.session.destroy((err) => {
+                if (err) {
+                    reject(err);
+                }
+                resolve();
+            });
+        });
         this.setStatus(200);
         return {
             status: 'ok',
             results: undefined,
+        };
+    }
+
+    /**
+     * Get user warehouse credentials
+     */
+    @Middlewares([isAuthenticated])
+    @Get('/warehouseCredentials')
+    @OperationId('getWarehouseCredentials')
+    async getWarehouseCredentials(@Request() req: express.Request): Promise<{
+        status: 'ok';
+        results: UserWarehouseCredentials[];
+    }> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getUserService()
+                .getWarehouseCredentials(req.user!),
+        };
+    }
+
+    /**
+     * Create user warehouse credentials
+     */
+    @Middlewares([isAuthenticated])
+    @Post('/warehouseCredentials')
+    @OperationId('createWarehouseCredentials')
+    async createWarehouseCredentials(
+        @Request() req: express.Request,
+        @Body() body: UpsertUserWarehouseCredentials,
+    ): Promise<{
+        status: 'ok';
+        results: UserWarehouseCredentials;
+    }> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getUserService()
+                .createWarehouseCredentials(req.user!, body),
+        };
+    }
+
+    /**
+     * Update user warehouse credentials
+     */
+    @Middlewares([isAuthenticated])
+    @Patch('/warehouseCredentials/{uuid}')
+    @OperationId('updateWarehouseCredentials')
+    async updateWarehouseCredentials(
+        @Request() req: express.Request,
+        @Path() uuid: string,
+        @Body() body: UpsertUserWarehouseCredentials,
+    ): Promise<{
+        status: 'ok';
+        results: UserWarehouseCredentials;
+    }> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getUserService()
+                .updateWarehouseCredentials(req.user!, uuid, body),
+        };
+    }
+
+    /**
+     * Delete user warehouse credentials
+     */
+    @Middlewares([isAuthenticated])
+    @Delete('/warehouseCredentials/{uuid}')
+    @OperationId('deleteWarehouseCredentials')
+    async deleteWarehouseCredentials(
+        @Request() req: express.Request,
+        @Path() uuid: string,
+    ): Promise<ApiSuccessEmpty> {
+        await this.services
+            .getUserService()
+            .deleteWarehouseCredentials(req.user!, uuid);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Get login options
+     */
+    @Get('/login-options')
+    @OperationId('getLoginOptions')
+    async getLoginOptions(
+        @Request() req: express.Request,
+        @Query() email?: string,
+    ): Promise<ApiGetLoginOptionsResponse> {
+        const loginOptions = await this.services
+            .getUserService()
+            .getLoginOptions(email);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: loginOptions,
+        };
+    }
+
+    /**
+     * Rotate personal access token
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Patch('/me/personal-access-tokens/{personalAccessTokenUuid}/rotate')
+    @OperationId('Rotate personal access token')
+    async rotatePersonalAccessToken(
+        @Path() personalAccessTokenUuid: string,
+        @Request() req: express.Request,
+        @Body()
+        body: {
+            expiresAt: Date;
+        },
+    ): Promise<{
+        status: 'ok';
+        results: PersonalAccessTokenWithToken;
+    }> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getPersonalAccessTokenService()
+                .rotatePersonalAccessToken(
+                    req.user!,
+                    personalAccessTokenUuid,
+                    body,
+                ),
         };
     }
 }

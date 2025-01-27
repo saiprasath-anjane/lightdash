@@ -1,4 +1,4 @@
-import { ComponentProps, FC } from 'react';
+import { type ComponentProps, type FC } from 'react';
 import {
     ExploreEmptyQueryState,
     ExploreIdleState,
@@ -11,17 +11,18 @@ import { TableProvider } from './TableProvider';
 
 type Props = ComponentProps<typeof TableProvider> & {
     status: 'idle' | 'loading' | 'success' | 'error';
-    loadingState?: FC;
-    idleState?: FC;
-    emptyState?: FC;
+    loadingState?: FC<React.PropsWithChildren<{}>>;
+    idleState?: FC<React.PropsWithChildren<{}>>;
+    emptyState?: FC<React.PropsWithChildren<{}>>;
     className?: string;
     minimal?: boolean;
+    showSubtotals?: boolean;
     $shouldExpand?: boolean;
     $padding?: number;
     'data-testid'?: string;
 };
 
-const Table: FC<Props> = ({
+const Table: FC<React.PropsWithChildren<Props>> = ({
     $shouldExpand,
     $padding,
     status,
@@ -30,6 +31,7 @@ const Table: FC<Props> = ({
     emptyState,
     className,
     minimal = false,
+    showSubtotals = true,
     'data-testid': dataTestId,
     ...rest
 }) => {
@@ -47,7 +49,10 @@ const Table: FC<Props> = ({
                 $padding={$padding}
                 data-testid={dataTestId}
             >
-                <ScrollableTable minimal={minimal} />
+                <ScrollableTable
+                    minimal={minimal}
+                    showSubtotals={showSubtotals}
+                />
 
                 {status === 'loading' && <LoadingState />}
                 {status === 'idle' && <IdleState />}

@@ -1,6 +1,6 @@
-import { ApiError, ApiSqlQueryResults } from '@lightdash/common';
-import { useMutation } from 'react-query';
-import { useParams } from 'react-router-dom';
+import { type ApiError, type ApiSqlQueryResults } from '@lightdash/common';
+import { useMutation } from '@tanstack/react-query';
+import { useParams } from 'react-router';
 import { lightdashApi } from '../api';
 import useToaster from './toaster/useToaster';
 
@@ -13,15 +13,16 @@ const runSqlQuery = async (projectUuid: string, sql: string) =>
 
 export const useSqlQueryMutation = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { showToastError } = useToaster();
+    const { showToastApiError } = useToaster();
     return useMutation<ApiSqlQueryResults, ApiError, string>(
-        (sql) => runSqlQuery(projectUuid, sql),
+        (sql) =>
+            projectUuid ? runSqlQuery(projectUuid, sql) : Promise.reject(),
         {
             mutationKey: ['run_sql_query', projectUuid],
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to run sql query`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },

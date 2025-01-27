@@ -1,14 +1,17 @@
 import { subject } from '@casl/ability';
-import { hasCustomDimension, ItemsMap, ResultValue } from '@lightdash/common';
-import { Menu, MenuProps, Text } from '@mantine/core';
+import {
+    hasCustomDimension,
+    type ItemsMap,
+    type ResultValue,
+} from '@lightdash/common';
+import { Menu, Text, type MenuProps } from '@mantine/core';
 import { IconArrowBarToDown, IconCopy, IconStack } from '@tabler/icons-react';
-import { FC } from 'react';
-import { useParams } from 'react-router-dom';
-
-import { useApp } from '../../../providers/AppProvider';
-import { useTracking } from '../../../providers/TrackingProvider';
+import { type FC } from 'react';
+import { useParams } from 'react-router';
+import useApp from '../../../providers/App/useApp';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
-import { useMetricQueryDataContext } from '../../MetricQueryData/MetricQueryDataProvider';
+import { useMetricQueryDataContext } from '../../MetricQueryData/useMetricQueryDataContext';
 import MantineIcon from '../MantineIcon';
 
 type ValueCellMenuProps = {
@@ -24,7 +27,7 @@ type ValueCellMenuProps = {
     ) => Record<string, ResultValue>;
 } & Pick<MenuProps, 'opened' | 'onOpen' | 'onClose'>;
 
-const ValueCellMenu: FC<ValueCellMenuProps> = ({
+const ValueCellMenu: FC<React.PropsWithChildren<ValueCellMenuProps>> = ({
     children,
     rowIndex,
     colIndex,
@@ -164,7 +167,7 @@ const ValueCellMenu: FC<ValueCellMenuProps> = ({
                     }
                     onClick={onCopy}
                 >
-                    Copy
+                    Copy value
                 </Menu.Item>
 
                 {item &&

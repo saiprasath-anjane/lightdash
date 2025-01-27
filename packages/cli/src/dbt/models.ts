@@ -1,11 +1,7 @@
 import {
     DbtDoc,
-    DbtManifest,
     DbtModelNode,
-    DbtRawModelNode,
     DimensionType,
-    isSupportedDbtAdapter,
-    normaliseModelDatabase,
     ParseError,
     patchPathParts,
 } from '@lightdash/common';
@@ -23,6 +19,7 @@ type CompiledModel = {
     database: string;
     originalFilePath: string;
     patchPath: string | null | undefined;
+    packageName: string;
     alias?: string;
 };
 
@@ -110,6 +107,7 @@ const askOverwriteDescription = async (
     columnName: string,
     existingDescription: string | undefined,
     newDescription: string | undefined,
+    assumeYes: boolean,
 ): Promise<string> => {
     if (!existingDescription) return newDescription || '';
     if (!newDescription) return existingDescription;
@@ -118,6 +116,8 @@ const askOverwriteDescription = async (
         isDocBlock(existingDescription)
     )
         return existingDescription;
+
+    if (assumeYes) return newDescription;
 
     const shortDescription = `${existingDescription.substring(0, 20)}${
         existingDescription.length > 20 ? '...' : ''
@@ -137,6 +137,8 @@ type FindAndUpdateModelYamlArgs = {
     docs: Record<string, DbtDoc>;
     includeMeta: boolean;
     projectDir: string;
+    projectName: string;
+    assumeYes: boolean;
 };
 export const findAndUpdateModelYaml = async ({
     model,
@@ -144,6 +146,8 @@ export const findAndUpdateModelYaml = async ({
     docs,
     includeMeta,
     projectDir,
+    projectName,
+    assumeYes,
 }: FindAndUpdateModelYamlArgs): Promise<{
     updatedYml: YamlSchema;
     outputFilePath: string;
@@ -154,17 +158,37 @@ export const findAndUpdateModelYaml = async ({
         includeMeta,
     });
     const filenames = [];
-    const { patchPath } = model;
+    const { patchPath, packageName } = model;
     if (patchPath) {
-        const { path: expectedYamlSubPath } = patchPathParts(patchPath);
-        const expectedYamlPath = path.join(projectDir, expectedYamlSubPath);
+        const { project: expectedYamlProject, path: expectedYamlSubPath } =
+            patchPathParts(patchPath);
+        const projectSubpath =
+            expectedYamlProject !== projectName
+                ? path.join('dbt_packages', expectedYamlProject)
+                : '.';
+        const expectedYamlPath = path.join(
+            projectDir,
+            projectSubpath,
+            expectedYamlSubPath,
+        );
         filenames.push(expectedYamlPath);
     }
-    const defaultYmlPath = path.join(
-        path.dirname(path.join(projectDir, model.originalFilePath)),
+    const outputDir = path.dirname(
+        path.join(
+            packageName === projectName
+                ? '.'
+                : path.join('dbt_packages', packageName),
+            model.originalFilePath,
+        ),
+    );
+    const outputFilePath = path.join(
+        projectDir,
+        outputDir,
         `${model.name}.yml`,
     );
-    filenames.push(defaultYmlPath);
+
+    filenames.push(outputFilePath);
+
     const match = await searchForModel({
         modelName: model.name,
         filenames,
@@ -201,6 +225,7 @@ export const findAndUpdateModelYaml = async ({
                         column.name,
                         existingDescription,
                         newDescription,
+                        assumeYes,
                     ),
                     ...(meta !== undefined ? { meta } : {}),
                 };
@@ -218,22 +243,29 @@ export const findAndUpdateModelYaml = async ({
         );
         let updatedColumns = [...existingColumnsUpdated, ...newColumns];
         if (deletedColumnNames.length > 0 && process.env.CI !== 'true') {
-            const spinner = GlobalState.getActiveSpinner();
-            spinner?.stop();
-            console.error(`
-These columns in your model ${styles.bold(model.name)} on file ${styles.bold(
-                match.filename.split('/').slice(-1),
-            )} no longer exist in your warehouse:
-${deletedColumnNames.map((name) => `- ${styles.bold(name)} \n`).join('')}
-            `);
-            const answers = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'isConfirm',
-                    message: `Would you like to remove them from your .yml file? `,
-                },
-            ]);
-            spinner?.start();
+            let answers = { isConfirm: assumeYes };
+
+            if (!assumeYes) {
+                const spinner = GlobalState.getActiveSpinner();
+                spinner?.stop();
+                console.error(`
+    These columns in your model ${styles.bold(
+        model.name,
+    )} on file ${styles.bold(
+                    match.filename.split('/').slice(-1),
+                )} no longer exist in your warehouse:
+    ${deletedColumnNames.map((name) => `- ${styles.bold(name)} \n`).join('')}
+                `);
+
+                answers = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'isConfirm',
+                        message: `Would you like to remove them from your .yml file? `,
+                    },
+                ]);
+                spinner?.start();
+            }
 
             if (answers.isConfirm) {
                 updatedColumns = updatedColumns.filter(
@@ -262,35 +294,11 @@ ${deletedColumnNames.map((name) => `- ${styles.bold(name)} \n`).join('')}
         version: 2 as const,
         models: [generatedModel],
     };
+
     return {
         updatedYml,
-        outputFilePath: defaultYmlPath,
+        outputFilePath,
     };
-};
-
-export const getModelsFromManifest = (
-    manifest: DbtManifest,
-): DbtModelNode[] => {
-    const models = Object.values(manifest.nodes).filter(
-        (node) =>
-            node.resource_type === 'model' &&
-            node.config?.materialized !== 'ephemeral',
-    ) as DbtRawModelNode[];
-
-    if (!isSupportedDbtAdapter(manifest.metadata)) {
-        throw new ParseError(
-            `dbt adapter not supported. Lightdash does not support adapter ${manifest.metadata.adapter_type}`,
-            {},
-        );
-    }
-    const adapterType = manifest.metadata.adapter_type;
-    return models
-        .filter(
-            (model) =>
-                model.config?.materialized &&
-                model.config.materialized !== 'ephemeral',
-        )
-        .map((model) => normaliseModelDatabase(model, adapterType));
 };
 
 export const getCompiledModels = async (
@@ -298,10 +306,11 @@ export const getCompiledModels = async (
     args: {
         select: string[] | undefined;
         exclude: string[] | undefined;
-        projectDir: string;
-        profilesDir: string;
+        projectDir: string | undefined;
+        profilesDir: string | undefined;
         target: string | undefined;
         profile: string | undefined;
+        vars: string | undefined;
     },
 ): Promise<CompiledModel[]> => {
     let allModelIds = models.map((model) => model.unique_id);
@@ -311,26 +320,31 @@ export const getCompiledModels = async (
         try {
             const { stdout } = await execa('dbt', [
                 'ls',
-                '--profiles-dir',
-                args.profilesDir,
-                '--project-dir',
-                args.projectDir,
+                ...(args.projectDir ? ['--project-dir', args.projectDir] : []),
+                ...(args.profilesDir
+                    ? ['--profiles-dir', args.profilesDir]
+                    : []),
                 ...(args.target ? ['--target', args.target] : []),
                 ...(args.profile ? ['--profile', args.profile] : []),
                 ...(args.select ? ['--select', args.select.join(' ')] : []),
                 ...(args.exclude ? ['--exclude', args.exclude.join(' ')] : []),
+                ...(args.vars ? ['--vars', args.vars] : []),
                 '--resource-type=model',
                 '--output=json',
             ]);
-
             const filteredModelIds = stdout
                 .split('\n')
                 .map((l) => l.trim())
                 .filter((l) => l.length > 0)
                 .map((l) => {
                     try {
-                        return JSON.parse(l);
-                    } catch (e) {
+                        // remove prefixed time in dbt cloud cli output
+                        const lineWithoutPrefixedTime = l.replace(
+                            /^\d{2}:\d{2}:\d{2}\s*/,
+                            '',
+                        );
+                        return JSON.parse(lineWithoutPrefixedTime);
+                    } catch {
                         return null;
                     }
                 })
@@ -338,8 +352,8 @@ export const getCompiledModels = async (
                     (l): l is { resource_type: string; unique_id: string } =>
                         l !== null,
                 )
-                .filter((model: any) => model.resource_type === 'model')
-                .map((model: any) => model.unique_id);
+                .filter((model) => model.resource_type === 'model')
+                .map((model) => model.unique_id);
 
             allModelIds = allModelIds.filter((modelId) =>
                 filteredModelIds.includes(modelId),
@@ -364,5 +378,6 @@ export const getCompiledModels = async (
         originalFilePath: modelLookup[modelId].original_file_path,
         patchPath: modelLookup[modelId].patch_path,
         alias: modelLookup[modelId].alias,
+        packageName: modelLookup[modelId].package_name,
     }));
 };

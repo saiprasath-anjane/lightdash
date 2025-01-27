@@ -1,22 +1,25 @@
 import {
-    ApiQueryResults,
-    CartesianChart,
     CartesianSeriesType,
-    CompleteCartesianChartLayout,
-    EchartsGrid,
-    EchartsLegend,
-    getCustomDimensionId,
     getSeriesId,
     isCompleteEchartsConfig,
     isCompleteLayout,
-    ItemsMap,
-    MarkLineData,
-    Series,
+    isNumericItem,
+    type ApiQueryResults,
+    type CartesianChart,
+    type CompleteCartesianChartLayout,
+    type EchartsGrid,
+    type EchartsLegend,
+    type ItemsMap,
+    type MarkLineData,
+    type Series,
+    type SeriesMetadata,
+    type TableCalculationMetadata,
 } from '@lightdash/common';
+import { produce } from 'immer';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     getMarkLineAxis,
-    ReferenceLineField,
+    type ReferenceLineField,
 } from '../../components/common/ReferenceLine';
 import {
     getExpectedSeriesMap,
@@ -43,6 +46,8 @@ type Args = {
     itemsMap: ItemsMap | undefined;
     stacking: boolean | undefined;
     cartesianType: CartesianTypeOptions | undefined;
+    colorPalette: string[];
+    tableCalculationsMetadata?: TableCalculationMetadata[];
 };
 
 const applyReferenceLines = (
@@ -117,19 +122,18 @@ const useCartesianChartConfig = ({
     itemsMap,
     stacking,
     cartesianType,
+    tableCalculationsMetadata,
 }: Args) => {
-    // FIXME: this might not be necessary
-    const hasInitialValue =
-        !!initialChartConfig &&
-        isCompleteLayout(initialChartConfig.layout) &&
-        isCompleteEchartsConfig(initialChartConfig.eChartsConfig);
     const [dirtyLayout, setDirtyLayout] = useState<
         Partial<CartesianChart['layout']> | undefined
     >(initialChartConfig?.layout);
+    const [dirtyMetadata, setDirtyMetadata] = useState<
+        CartesianChart['metadata'] | undefined
+    >(initialChartConfig?.metadata);
+
     const [dirtyEchartsConfig, setDirtyEchartsConfig] = useState<
         Partial<CartesianChart['eChartsConfig']> | undefined
     >(initialChartConfig?.eChartsConfig);
-
     const isInitiallyStacked = (dirtyEchartsConfig?.series || []).some(
         (series: Series) => series.stack !== undefined,
     );
@@ -218,6 +222,78 @@ const useCartesianChartConfig = ({
         [],
     );
 
+    const setXMinValue = useCallback(
+        (index: number, value: string | undefined) => {
+            setDirtyEchartsConfig((prevState) => {
+                return {
+                    ...prevState,
+                    xAxis: [
+                        prevState?.xAxis?.[0] || {},
+                        prevState?.xAxis?.[1] || {},
+                    ].map((axis, axisIndex) =>
+                        axisIndex === index ? { ...axis, min: value } : axis,
+                    ),
+                };
+            });
+        },
+        [],
+    );
+
+    const setXMinOffsetValue = useCallback(
+        (index: number, value: string | undefined) => {
+            setDirtyEchartsConfig((prevState) => {
+                return {
+                    ...prevState,
+                    xAxis: [
+                        prevState?.xAxis?.[0] || {},
+                        prevState?.xAxis?.[1] || {},
+                    ].map((axis, axisIndex) =>
+                        axisIndex === index
+                            ? { ...axis, minOffset: value }
+                            : axis,
+                    ),
+                };
+            });
+        },
+        [],
+    );
+
+    const setXMaxValue = useCallback(
+        (index: number, value: string | undefined) => {
+            setDirtyEchartsConfig((prevState) => {
+                return {
+                    ...prevState,
+                    xAxis: [
+                        prevState?.xAxis?.[0] || {},
+                        prevState?.xAxis?.[1] || {},
+                    ].map((axis, axisIndex) =>
+                        axisIndex === index ? { ...axis, max: value } : axis,
+                    ),
+                };
+            });
+        },
+        [],
+    );
+
+    const setXMaxOffsetValue = useCallback(
+        (index: number, value: string | undefined) => {
+            setDirtyEchartsConfig((prevState) => {
+                return {
+                    ...prevState,
+                    xAxis: [
+                        prevState?.xAxis?.[0] || {},
+                        prevState?.xAxis?.[1] || {},
+                    ].map((axis, axisIndex) =>
+                        axisIndex === index
+                            ? { ...axis, maxOffset: value }
+                            : axis,
+                    ),
+                };
+            });
+        },
+        [],
+    );
+
     const setXField = useCallback((xField: string | undefined) => {
         setDirtyLayout((prev) => ({
             ...prev,
@@ -247,6 +323,15 @@ const useCartesianChartConfig = ({
             return x;
         });
     }, []);
+    const setXAxisLabelRotation = useCallback((rotation: number) => {
+        setDirtyEchartsConfig((prevState) => {
+            const [firstAxis, ...axes] = prevState?.xAxis || [];
+            return {
+                ...prevState,
+                xAxis: [{ ...firstAxis, rotate: rotation }, ...axes],
+            };
+        });
+    }, []);
     const addSingleSeries = useCallback((yField: string) => {
         setDirtyLayout((prev) => ({
             ...prev,
@@ -255,6 +340,26 @@ const useCartesianChartConfig = ({
     }, []);
 
     const removeSingleSeries = useCallback((index: number) => {
+        setDirtyEchartsConfig((prev) => {
+            /**
+             * Clean up any color data assigned to this series, to prevent confusing
+             * behaviors around reordering and deleting/re-adding series.
+             */
+            if (prev?.series && prev.series[index]) {
+                const newSeries = [...prev.series];
+                newSeries[index] = {
+                    ...newSeries[index],
+                    color: undefined,
+                };
+
+                return {
+                    ...prev,
+                    series: newSeries,
+                };
+            }
+
+            return prev;
+        });
         setDirtyLayout((prev) => ({
             ...prev,
             yField: prev?.yField
@@ -316,18 +421,15 @@ const useCartesianChartConfig = ({
     const updateAllGroupedSeries = useCallback(
         (fieldKey: string, updateSeries: Partial<Series>) =>
             setDirtyEchartsConfig(
-                (prevState) =>
-                    prevState && {
-                        ...prevState,
-                        series: prevState?.series?.map((series) =>
-                            series.encode.yRef.field === fieldKey
-                                ? {
-                                      ...series,
-                                      ...updateSeries,
-                                  }
-                                : series,
-                        ),
-                    },
+                produce((draft) => {
+                    if (!draft) return;
+
+                    draft.series = draft.series?.map((series) =>
+                        series.encode.yRef.field === fieldKey
+                            ? { ...series, ...updateSeries }
+                            : series,
+                    );
+                }),
             ),
         [],
     );
@@ -344,6 +446,14 @@ const useCartesianChartConfig = ({
             };
         });
     }, []);
+
+    const getSingleSeries = useCallback(
+        (series: Series) =>
+            dirtyEchartsConfig?.series?.find(
+                (s) => getSeriesId(s) === getSeriesId(series),
+            ),
+        [dirtyEchartsConfig?.series],
+    );
 
     const updateSeries = useCallback((series: Series[]) => {
         setDirtyEchartsConfig((prev) => {
@@ -362,18 +472,47 @@ const useCartesianChartConfig = ({
             const yFields = dirtyLayout?.yField || [];
             const isPivoted = pivotKeys && pivotKeys.length > 0;
             setIsStacked(stack);
-            yFields.forEach((yField) => {
-                updateAllGroupedSeries(yField, {
-                    stack: stack
-                        ? isPivoted
-                            ? yField
-                            : 'stack-all-series'
-                        : undefined,
-                });
-            });
+            setDirtyEchartsConfig(
+                produce((draft) => {
+                    if (!draft) return;
+                    draft.series = draft.series?.map((series) => {
+                        const { field } = series.encode.yRef;
+                        if (yFields.includes(field)) {
+                            return {
+                                ...series,
+                                stack: stack
+                                    ? isPivoted
+                                        ? field
+                                        : 'stack-all-series'
+                                    : undefined,
+                            };
+                        }
+                        return series;
+                    });
+                }),
+            );
         },
-        [dirtyLayout?.yField, updateAllGroupedSeries, pivotKeys],
+        [dirtyLayout?.yField, pivotKeys],
     );
+
+    useEffect(() => {
+        // If the xField is a table calculation and its type is a number, do not stack
+        // This is computed on first load and also when the table calculation is updated in edit mode
+        if (stacking === false) return;
+        const tableCalculation =
+            resultsData?.metricQuery.tableCalculations?.find(
+                (tc) => tc.name === dirtyLayout?.xField,
+            );
+        if (tableCalculation) {
+            const isNumber = isNumericItem(tableCalculation);
+            if (isNumber) setStacking(false);
+        }
+    }, [
+        dirtyLayout?.xField,
+        resultsData?.metricQuery.tableCalculations,
+        stacking,
+        setStacking,
+    ]);
 
     useEffect(() => {
         if (stacking !== undefined) {
@@ -389,47 +528,110 @@ const useCartesianChartConfig = ({
         );
     }, [resultsData?.metricQuery.dimensions, itemsMap, columnOrder]);
 
-    const [
-        availableFields,
-        availableDimensions,
-        availableMetrics,
-        availableTableCalculations,
-        availableCustomDimensions,
-    ] = useMemo(() => {
-        const metrics = resultsData?.metricQuery.metrics || [];
-        const tableCalculations =
-            resultsData?.metricQuery.tableCalculations.map(
-                ({ name }) => name,
-            ) || [];
-        const customDimensions =
-            resultsData?.metricQuery.customDimensions?.map(
-                getCustomDimensionId,
-            ) || [];
-        return [
-            [
-                ...sortedDimensions,
-                ...metrics,
-                ...tableCalculations,
-                ...customDimensions,
-            ],
-            [...sortedDimensions, ...customDimensions],
-            metrics,
-            tableCalculations,
-            customDimensions,
-        ];
-    }, [resultsData, sortedDimensions]);
+    const [availableFields, availableDimensions, availableMetrics] =
+        useMemo(() => {
+            const metrics = resultsData?.metricQuery.metrics || [];
+            const tableCalculations =
+                resultsData?.metricQuery.tableCalculations.map(
+                    ({ name }) => name,
+                ) || [];
+
+            return [
+                [...sortedDimensions, ...metrics, ...tableCalculations],
+                [...sortedDimensions],
+                metrics,
+            ];
+        }, [resultsData, sortedDimensions]);
+
+    /**
+     * Is valid when the field is a table calculation in the metadata with the current name
+     */
+    const isFieldValidTableCalculation = useCallback(
+        (fieldName: string) => {
+            return Boolean(
+                tableCalculationsMetadata?.some((tc) => tc.name === fieldName),
+            );
+        },
+        [tableCalculationsMetadata],
+    );
+
+    /**
+     * Returns the index of the table calculation metadata with the old name
+     */
+    const getOldTableCalculationMetadataIndex = useCallback(
+        (fieldName: string) => {
+            return (
+                tableCalculationsMetadata?.findIndex(
+                    (tc) => tc.oldName === fieldName,
+                ) ?? -1
+            );
+        },
+        [tableCalculationsMetadata],
+    );
+
+    /**
+     * When table calculations update, their name changes, so we need to update the selected fields
+     * If the xField is a table calculation with the old name in the metadata, return the current name otherwise return xField
+     */
+    const getXField = useCallback(
+        (xField?: string) => {
+            if (!tableCalculationsMetadata || !xField) return xField;
+
+            const xFieldTcIndex = getOldTableCalculationMetadataIndex(xField);
+
+            return xFieldTcIndex !== -1
+                ? tableCalculationsMetadata[xFieldTcIndex].name
+                : xField;
+        },
+        [getOldTableCalculationMetadataIndex, tableCalculationsMetadata],
+    );
+
+    /**
+     * When table calculations update, their name changes, so we need to update the selected fields
+     * If any yField is a table calculation with the old name in the metadata, return the current name otherwise return yField
+     */
+    const getYFields = useCallback(
+        (yFields?: string[]) => {
+            if (!tableCalculationsMetadata || !yFields) return yFields;
+
+            return yFields.map((yField) => {
+                const yFieldTcIndex =
+                    getOldTableCalculationMetadataIndex(yField);
+
+                return yFieldTcIndex !== -1
+                    ? tableCalculationsMetadata[yFieldTcIndex].name
+                    : yField;
+            });
+        },
+        [getOldTableCalculationMetadataIndex, tableCalculationsMetadata],
+    );
 
     // Set fallout layout values
     // https://www.notion.so/lightdash/Default-chart-configurations-5d3001af990d4b6fa990dba4564540f6
     useEffect(() => {
         if (availableFields.length > 0) {
             setDirtyLayout((prev) => {
+                /**
+                 * Get the fields with the current table calculation names when they are a table calculation with the old name
+                 * otherwise keep the fields as they are
+                 */
+                const xField = getXField(prev?.xField);
+                const yFields = getYFields(prev?.yField);
+
                 const isCurrentXFieldValid: boolean =
-                    prev?.xField === EMPTY_X_AXIS ||
-                    (!!prev?.xField && availableFields.includes(prev.xField));
-                const currentValidYFields = prev?.yField
-                    ? prev.yField.filter((y) => availableFields.includes(y))
+                    xField === EMPTY_X_AXIS ||
+                    (!!xField &&
+                        (availableFields.includes(xField) ||
+                            isFieldValidTableCalculation(xField)));
+
+                const currentValidYFields = yFields
+                    ? yFields.filter(
+                          (y) =>
+                              availableFields.includes(y) ||
+                              isFieldValidTableCalculation(y),
+                      )
                     : [];
+
                 const isCurrentYFieldsValid: boolean =
                     currentValidYFields.length > 0;
 
@@ -437,7 +639,7 @@ const useCartesianChartConfig = ({
                 if (isCurrentXFieldValid && isCurrentYFieldsValid) {
                     return {
                         ...prev,
-                        xField: prev?.xField,
+                        xField,
                         yField: currentValidYFields,
                     };
                 }
@@ -449,9 +651,10 @@ const useCartesianChartConfig = ({
                 ) {
                     const usedFields: string[] = [];
 
-                    if (isCurrentXFieldValid && prev?.xField) {
-                        usedFields.push(prev?.xField);
+                    if (isCurrentXFieldValid && xField) {
+                        usedFields.push(xField);
                     }
+
                     if (isCurrentYFieldsValid) {
                         usedFields.push(...currentValidYFields);
                     }
@@ -476,6 +679,7 @@ const useCartesianChartConfig = ({
                     if (!isCurrentYFieldsValid && fallbackYFields) {
                         return {
                             ...prev,
+                            xField,
                             yField: [fallbackYFields],
                         };
                     }
@@ -552,15 +756,14 @@ const useCartesianChartConfig = ({
             });
         }
     }, [
-        availableFields,
         availableDimensions,
+        availableFields,
         availableMetrics,
-        availableTableCalculations,
-        availableCustomDimensions,
-        hasInitialValue,
+        getXField,
+        getYFields,
+        isFieldValidTableCalculation,
         itemsMap,
         setPivotDimensions,
-        setType,
     ]);
 
     const selectedReferenceLines: ReferenceLineField[] = useMemo(() => {
@@ -661,10 +864,13 @@ const useCartesianChartConfig = ({
     const validConfig: CartesianChart = useMemo(() => {
         return isCompleteLayout(dirtyLayout) &&
             isCompleteEchartsConfig(dirtyEchartsConfig)
-            ? { layout: dirtyLayout, eChartsConfig: dirtyEchartsConfig }
+            ? {
+                  layout: dirtyLayout,
+                  eChartsConfig: dirtyEchartsConfig,
+                  metadata: dirtyMetadata,
+              }
             : EMPTY_CARTESIAN_CHART_CONFIG;
-    }, [dirtyLayout, dirtyEchartsConfig]);
-
+    }, [dirtyLayout, dirtyEchartsConfig, dirtyMetadata]);
     const { dirtyChartType } = useMemo(() => {
         const firstSeriesType =
             dirtyEchartsConfig?.series?.[0]?.type || CartesianSeriesType.BAR;
@@ -678,11 +884,19 @@ const useCartesianChartConfig = ({
         };
     }, [dirtyEchartsConfig]);
 
+    const updateMetadata = useCallback(
+        (metadata: Record<string, SeriesMetadata>) => {
+            setDirtyMetadata(metadata);
+        },
+        [],
+    );
+
     return {
         validConfig,
         dirtyChartType,
         dirtyLayout,
         dirtyEchartsConfig,
+        dirtyMetadata,
         setXField,
         setType,
         setXAxisName,
@@ -691,20 +905,27 @@ const useCartesianChartConfig = ({
         isStacked,
         addSingleSeries,
         updateSingleSeries,
+        getSingleSeries,
         removeSingleSeries,
         updateAllGroupedSeries,
         updateYField,
         setFlipAxis,
         setYMinValue,
         setYMaxValue,
+        setXMinValue,
+        setXMinOffsetValue,
+        setXMaxValue,
+        setXMaxOffsetValue,
         setLegend,
         setGrid,
         setShowGridX,
         setShowGridY,
         setInverseX,
+        setXAxisLabelRotation,
         updateSeries,
         referenceLines,
         setReferenceLines,
+        updateMetadata,
     };
 };
 

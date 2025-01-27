@@ -1,5 +1,5 @@
 import { Group, Input, NumberInput } from '@mantine/core';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import {
     getMonthlyCronExpression,
     parseCronExpression,
@@ -35,13 +35,11 @@ const MonthlyInputs: FC<{
                 max={31}
             />
             <Input.Label>at</Input.Label>
-
             <TimePicker
                 disabled={disabled}
                 cronExpression={cronExpression}
                 onChange={onTimeChange}
             />
-            <Input.Label>UTC</Input.Label>
         </Group>
     );
 };

@@ -1,14 +1,10 @@
-import { ForbiddenError } from '@lightdash/common';
+import { AnyType, ForbiddenError, getErrorMessage } from '@lightdash/common';
 import { createHmac } from 'crypto';
 import express from 'express';
+import playwright from 'playwright';
 import { lightdashConfig } from '../config/lightdashConfig';
-import { userModel } from '../models/models';
-import { EncryptionService } from '../services/EncryptionService/EncryptionService';
-
-const puppeteer = require('puppeteer');
 
 export const headlessBrowserRouter = express.Router({ mergeParams: true });
-export const encryptionService = new EncryptionService({ lightdashConfig });
 
 export const getAuthenticationToken = (value: string) =>
     createHmac('sha512', lightdashConfig.lightdashSecret)
@@ -23,7 +19,9 @@ headlessBrowserRouter.post('/login/:userUuid', async (req, res, next) => {
         if (hash !== req.body.token) {
             throw new ForbiddenError();
         }
-        const sessionUser = await userModel.findSessionUserByUUID(userUuid);
+        const sessionUser = await req.services
+            .getUserService()
+            .getSessionByUserUuid(userUuid);
 
         req.login(sessionUser, (err) => {
             if (err) {
@@ -63,9 +61,9 @@ if (
         try {
             const browserWSEndpoint = `ws://${process.env.HEADLESS_BROWSER_HOST}:${process.env.HEADLESS_BROWSER_PORT}`;
             console.debug(`Headless chrome endpoint: ${browserWSEndpoint}`);
-            browser = await puppeteer.connect({
+            browser = await playwright.chromium.connectOverCDP(
                 browserWSEndpoint,
-            });
+            );
 
             const page = await browser.newPage();
 
@@ -73,6 +71,9 @@ if (
             console.debug(`Fetching headless chrome URL: ${testUrl}`);
 
             const response = await page.goto(testUrl, {});
+            if (!response) {
+                throw new Error('No response');
+            }
             const result = await response.json();
 
             res.json({
@@ -85,7 +86,7 @@ if (
             });
         } catch (e) {
             console.error(e);
-            next(e.message);
+            next(getErrorMessage(e));
         } finally {
             if (browser) await browser.close();
         }
@@ -105,16 +106,16 @@ if (
         try {
             const browserWSEndpoint = `ws://${process.env.HEADLESS_BROWSER_HOST}:${process.env.HEADLESS_BROWSER_PORT}`;
             console.debug(`Headless chrome endpoint: ${browserWSEndpoint}`);
-            browser = await puppeteer.connect({
+            browser = await playwright.chromium.connectOverCDP(
                 browserWSEndpoint,
-            });
+            );
 
             const page = await browser.newPage();
             await page.setExtraHTTPHeaders({
                 cookie: req.headers.cookie || '',
             });
 
-            await page.setViewport({
+            await page.setViewportSize({
                 width: 1400,
                 height: 768, // hardcoded
             });
@@ -125,8 +126,7 @@ if (
                 'analytics.lightdash.com',
                 'intercom.io',
             ];
-            await page.setRequestInterception(true);
-            page.on('request', (request: any) => {
+            page.on('request', (request: AnyType) => {
                 const requestUrl = request.url();
                 if (blockedUrls.includes(requestUrl)) {
                     request.abort();
@@ -137,7 +137,6 @@ if (
             });
             await page.goto(url, {
                 timeout: 100000,
-                waitUntil: 'networkidle0',
             });
 
             const selector = isDashboard
@@ -146,7 +145,7 @@ if (
             await page.waitForSelector(selector);
             const element = await page.$(selector);
             if (isDashboard) {
-                await page.evaluate((sel: any) => {
+                await page.evaluate((sel: AnyType) => {
                     // @ts-ignore
                     const elements = document.querySelectorAll(sel);
                     elements.forEach((el) => el.parentNode.removeChild(el));
@@ -162,6 +161,9 @@ if (
                 });
             }
 
+            if (!element) {
+                throw new Error('Element not found');
+            }
             const imageBuffer = await element.screenshot({
                 path: '/tmp/test-screenshot.png',
             });
@@ -173,7 +175,7 @@ if (
             res.end(imageBuffer);
         } catch (e) {
             console.error(e);
-            next(e.message);
+            next(getErrorMessage(e));
         } finally {
             if (browser) await browser.close();
         }

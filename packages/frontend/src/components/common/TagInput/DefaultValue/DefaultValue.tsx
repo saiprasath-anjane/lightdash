@@ -1,9 +1,9 @@
 import {
     CloseButton,
-    DefaultProps,
-    MantineNumberSize,
-    MantineSize,
-    Selectors,
+    type DefaultProps,
+    type MantineNumberSize,
+    type MantineSize,
+    type Selectors,
 } from '@mantine/core';
 import React from 'react';
 import useStyles from './DefaultValue.styles';
@@ -12,7 +12,7 @@ export type DefaultValueStylesNames = Selectors<typeof useStyles>;
 
 export interface TagInputValueProps
     extends DefaultProps<DefaultValueStylesNames>,
-        React.ComponentPropsWithoutRef<'div'> {
+        Omit<React.ComponentPropsWithoutRef<'div'>, 'style'> {
     label: string;
     onRemove(): void;
     disabled: boolean;

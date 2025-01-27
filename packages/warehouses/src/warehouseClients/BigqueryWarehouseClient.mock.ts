@@ -1,11 +1,15 @@
 import { BigQueryDate, BigQueryTimestamp } from '@google-cloud/bigquery';
-import { CreateBigqueryCredentials, WarehouseTypes } from '@lightdash/common';
+import {
+    AnyType,
+    CreateBigqueryCredentials,
+    WarehouseTypes,
+} from '@lightdash/common';
 import { Readable } from 'stream';
 import { BigqueryFieldType } from './BigqueryWarehouseClient';
 
 export const credentials: CreateBigqueryCredentials = {
     type: WarehouseTypes.BIGQUERY,
-    project: '',
+    project: 'myDatabase',
     dataset: '',
     timeoutSeconds: 0,
     priority: 'interactive',
@@ -51,15 +55,12 @@ const metadata = {
 };
 
 export const getTableResponse = {
+    id: 'myTable',
+    bigQuery: { projectId: 'myDatabase' },
     getMetadata: jest.fn(() => [metadata]),
 };
-export const getDatasetResponse = {
-    id: 'mySchema',
-    bigQuery: { projectId: 'myDatabase' },
-    table: jest.fn(() => getTableResponse),
-};
 
-export const rows: Record<string, any>[] = [
+export const rows: Record<string, AnyType>[] = [
     {
         myStringColumn: 'string value',
         myNumberColumn: 100,

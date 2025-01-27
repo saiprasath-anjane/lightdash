@@ -1,17 +1,26 @@
 import {
     assertUnreachable,
-    Dashboard,
-    DashboardLoomTileProperties,
-    DashboardMarkdownTileProperties,
     DashboardTileTypes,
+    type Dashboard,
+    type DashboardLoomTileProperties,
+    type DashboardMarkdownTile,
+    type DashboardMarkdownTileProperties,
 } from '@lightdash/common';
-import { Button, Group, Modal, ModalProps, Stack, Title } from '@mantine/core';
-import { useForm, UseFormReturnType } from '@mantine/form';
+import {
+    Button,
+    Group,
+    Modal,
+    Stack,
+    Title,
+    type ModalProps,
+} from '@mantine/core';
+import { useForm, type UseFormReturnType } from '@mantine/form';
 import { IconMarkdown, IconVideo } from '@tabler/icons-react';
-import produce from 'immer';
+import { produce } from 'immer';
 import MantineIcon from '../../common/MantineIcon';
-import LoomTileForm, { getLoomId } from './LoomTileForm';
+import LoomTileForm from './LoomTileForm';
 import MarkdownTileForm from './MarkdownTileForm';
+import { getLoomId, markdownTileContentTransform } from './utils';
 
 type Tile = Dashboard['tiles'][number];
 type TileProperties = Tile['properties'];
@@ -46,6 +55,15 @@ const TileUpdateModal = <T extends Tile>({
         initialValues: { ...tile.properties },
         validate: getValidators(),
         validateInputOnChange: ['title', 'url'],
+        transformValues(values) {
+            if (tile.type === DashboardTileTypes.MARKDOWN) {
+                return markdownTileContentTransform(
+                    values as DashboardMarkdownTile['properties'],
+                );
+            }
+
+            return values;
+        },
     });
 
     const handleConfirm = form.onSubmit(({ ...properties }) => {
@@ -78,8 +96,10 @@ const TileUpdateModal = <T extends Tile>({
         >
             <form onSubmit={handleConfirm}>
                 <Stack spacing="lg" pt="sm">
-                    {tile.type ===
-                    DashboardTileTypes.SAVED_CHART ? null : tile.type ===
+                    {tile.type === DashboardTileTypes.SAVED_CHART ||
+                    tile.type ===
+                        DashboardTileTypes.SQL_CHART ? null : tile.type ===
+                      DashboardTileTypes.SEMANTIC_VIEWER_CHART ? null : tile.type ===
                       DashboardTileTypes.MARKDOWN ? (
                         <MarkdownTileForm
                             form={
@@ -103,7 +123,7 @@ const TileUpdateModal = <T extends Tile>({
 
                     <Group position="right" mt="sm">
                         <Button variant="outline" onClick={() => onClose?.()}>
-                            Cancels
+                            Cancel
                         </Button>
 
                         <Button type="submit" disabled={!form.isValid()}>

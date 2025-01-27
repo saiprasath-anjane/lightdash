@@ -1,4 +1,5 @@
 import {
+    AnyType,
     ConditionalOperator,
     CreateBigqueryCredentials,
     DbtCloudIDEProjectConfig,
@@ -7,7 +8,6 @@ import {
     DimensionType,
     Explore,
     FieldType,
-    LightdashMode,
     MetricFilterRule,
     MetricType,
     OrderFieldsByStrategy,
@@ -18,119 +18,13 @@ import {
     TableSelectionType,
     WarehouseTypes,
 } from '@lightdash/common';
-import { LightdashConfig } from '../../config/parseConfig';
 import { ProjectTable } from '../../database/entities/projects';
-import { EncryptionService } from '../../services/EncryptionService/EncryptionService';
-
-export const lightdashConfigMock: LightdashConfig = {
-    mode: LightdashMode.DEFAULT,
-    version: '1.0',
-    lightdashSecret: 'secret',
-    secureCookies: true,
-    cookiesMaxAgeHours: undefined,
-    trustProxy: true,
-    rudder: {
-        writeKey: '',
-        dataPlaneUrl: '',
-    },
-    sentry: {
-        dsn: '',
-        release: '',
-        environment: '',
-    },
-    auth: {
-        disablePasswordAuthentication: false,
-        google: {
-            oauth2ClientId: undefined,
-            oauth2ClientSecret: undefined,
-            loginPath: '',
-            callbackPath: '',
-            googleDriveApiKey: undefined,
-            enabled: false,
-        },
-        okta: {
-            loginPath: '',
-            callbackPath: '',
-            oauth2ClientSecret: undefined,
-            oauth2ClientId: undefined,
-            oauth2Issuer: undefined,
-            authorizationServerId: undefined,
-            oktaDomain: undefined,
-        },
-        oneLogin: {
-            loginPath: '',
-            callbackPath: '',
-            oauth2ClientSecret: undefined,
-            oauth2ClientId: undefined,
-            oauth2Issuer: undefined,
-        },
-        azuread: {
-            loginPath: '',
-            callbackPath: '',
-            oauth2ClientSecret: undefined,
-            oauth2ClientId: undefined,
-            oauth2TenantId: '',
-        },
-    },
-    posthog: {
-        projectApiKey: '',
-        apiHost: '',
-    },
-    intercom: {
-        appId: '',
-        apiBase: '',
-    },
-    smtp: undefined,
-    siteUrl: '',
-    staticIp: '',
-    database: {
-        connectionUri: undefined,
-        maxConnections: undefined,
-        minConnections: undefined,
-    },
-    allowMultiOrgs: false,
-    maxPayloadSize: '5mb',
-    query: {
-        maxLimit: 5000,
-        csvCellsLimit: 100000,
-    },
-    scheduler: {
-        enabled: false,
-        concurrency: 1,
-        jobTimeout: 1,
-    },
-    logging: {
-        level: 'info',
-        format: 'pretty',
-        outputs: ['console'],
-        consoleFormat: undefined,
-        consoleLevel: undefined,
-        fileFormat: undefined,
-        filePath: '',
-        fileLevel: undefined,
-    },
-    chart: {
-        versionHistory: { daysLimit: 3 },
-    },
-    customVisualizations: {
-        enabled: false,
-    },
-    pivotTable: {
-        maxColumnLimit: 60,
-    },
-    resultsCache: {
-        enabled: false,
-        cacheStateTimeSeconds: 86400,
-        s3: {},
-    },
-};
+import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
 
 const dbtCloudIDEProjectConfigMock: DbtCloudIDEProjectConfig = {
     type: DbtProjectType.DBT_CLOUD_IDE,
     api_key: 'my api key',
-    account_id: 'account_id',
     environment_id: 'environment_id',
-    project_id: 'project_id',
 };
 
 const bigqueryCredentials: CreateBigqueryCredentials = {
@@ -145,10 +39,10 @@ const bigqueryCredentials: CreateBigqueryCredentials = {
     maximumBytesBilled: 1,
 };
 
-export const encryptionServiceMock = {
+export const encryptionUtilMock = {
     encrypt: jest.fn(() => Buffer.from('encrypted')),
     decrypt: jest.fn((encrypted: Buffer) => encrypted.toString()),
-} as any as EncryptionService;
+} as AnyType as EncryptionUtil;
 
 export const projectUuid = 'project uuid';
 
@@ -160,6 +54,7 @@ export const projectMock = {
     warehouse_type: WarehouseTypes.BIGQUERY,
     organization_uuid: 'organizationUuid',
     dbt_version: DefaultSupportedDbtVersion,
+    scheduler_timezone: 'UTC',
 };
 
 export const tableSelectionMock: Pick<
@@ -190,11 +85,9 @@ export const expectedProject: Project = {
     name: 'my project',
     type: ProjectType.DEFAULT,
     dbtConnection: {
-        account_id: 'account_id',
         environment_id: 'environment_id',
-        project_id: 'project_id',
         type: DbtProjectType.DBT_CLOUD_IDE,
-    } as any as DbtCloudIDEProjectConfig,
+    } as AnyType as DbtCloudIDEProjectConfig,
     warehouseConnection: {
         dataset: 'name',
         location: 'name',
@@ -206,6 +99,8 @@ export const expectedProject: Project = {
         type: WarehouseTypes.BIGQUERY,
     },
     dbtVersion: DefaultSupportedDbtVersion,
+    schedulerTimezone: 'UTC',
+    createdByUserUuid: null,
 };
 
 const metricFilter: MetricFilterRule = {

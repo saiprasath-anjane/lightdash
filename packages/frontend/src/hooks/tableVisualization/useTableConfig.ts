@@ -1,29 +1,33 @@
 import {
-    ApiQueryResults,
-    ColumnProperties,
-    ConditionalFormattingConfig,
-    DashboardFilters,
+    FieldType,
     getItemLabel,
     isDimension,
     isField,
     isMetric,
+    isSummable,
     isTableCalculation,
     itemsInMetricQuery,
-    ItemsMap,
-    PivotData,
-    ResultRow,
-    TableChart,
+    type ApiQueryResults,
+    type ColumnProperties,
+    type ConditionalFormattingConfig,
+    type DashboardFilters,
+    type ItemsMap,
+    type PivotData,
+    type ResultRow,
+    type TableChart,
 } from '@lightdash/common';
 import { createWorkerFactory, useWorker } from '@shopify/react-web-worker';
 import uniq from 'lodash/uniq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { TableColumn, TableHeader } from '../../components/common/Table/types';
+import {
+    type TableColumn,
+    type TableHeader,
+} from '../../components/common/Table/types';
 import { useCalculateTotal } from '../useCalculateTotal';
-import { isSummable } from '../useColumnTotals';
 import getDataAndColumns from './getDataAndColumns';
 
 const createWorker = createWorkerFactory(
-    () => import('../pivotTable/pivotQueryResults'),
+    () => import('@lightdash/common/src/pivotTable/pivotQueryResults'),
 );
 
 const useTableConfig = (
@@ -56,6 +60,9 @@ const useTableConfig = (
     );
     const [showResultsTotal, setShowResultsTotal] = useState<boolean>(
         tableChartConfig?.showResultsTotal ?? false,
+    );
+    const [showSubtotals, setShowSubtotals] = useState<boolean>(
+        tableChartConfig?.showSubtotals ?? false,
     );
     const [hideRowNumbers, setHideRowNumbers] = useState<boolean>(
         tableChartConfig?.hideRowNumbers === undefined
@@ -155,19 +162,44 @@ const useTableConfig = (
         [columnProperties],
     );
 
-    const canUsePivotTable =
+    const isPivotTableEnabled =
         resultsData?.metricQuery &&
         resultsData.metricQuery.metrics.length > 0 &&
         resultsData.rows.length &&
         pivotDimensions &&
         pivotDimensions.length > 0;
 
+    const dimensions = useMemo(() => {
+        if (!itemsMap) return [];
+
+        return columnOrder.filter((fieldId) => {
+            const item = itemsMap[fieldId];
+            return item && isField(item)
+                ? item.fieldType === FieldType.DIMENSION
+                : false;
+        });
+    }, [columnOrder, itemsMap]);
+
+    const numUnpivotedDimensions =
+        dimensions.length - (pivotDimensions?.length || 0);
+
+    const canUseSubtotals = useMemo(() => {
+        return !metricsAsRows && numUnpivotedDimensions > 1;
+    }, [metricsAsRows, numUnpivotedDimensions]);
+
+    // Once dimensions are loaded, if there are not enough dimensions to use subtotals then
+    // turn off "Show subtotals" so that "Show metrics as rows" can be enabled.
+    useEffect(() => {
+        if (dimensions.length > 0 && numUnpivotedDimensions < 2)
+            setShowSubtotals(false);
+    }, [dimensions.length, numUnpivotedDimensions]);
+
     const { data: totalCalculations } = useCalculateTotal(
         savedChartUuid
             ? {
                   savedChartUuid,
                   fieldIds: selectedItemIds,
-                  dashboardFilters: dashboardFilters,
+                  dashboardFilters,
                   invalidateCache,
                   itemsMap,
                   showColumnCalculation:
@@ -300,6 +332,8 @@ const useTableConfig = (
                 options: {
                     maxColumns: pivotTableMaxColumnLimit,
                 },
+                getField,
+                getFieldLabel,
             })
             .then((data) => {
                 setPivotTableData({
@@ -323,6 +357,7 @@ const useTableConfig = (
         selectedItemIds,
         isColumnVisible,
         getField,
+        getFieldLabel,
         tableChartConfig?.showColumnCalculation,
         tableChartConfig?.showRowCalculation,
         worker,
@@ -332,12 +367,24 @@ const useTableConfig = (
     // Remove columnProperties from map if the column has been removed from results
     useEffect(() => {
         if (Object.keys(columnProperties).length > 0 && selectedItemIds) {
-            const columnsRemoved = Object.keys(columnProperties).filter(
-                (field) => !selectedItemIds.includes(field),
-            );
-            columnsRemoved.forEach((field) => delete columnProperties[field]);
-
-            setColumnProperties(columnProperties);
+            const newColumnProperties: Record<string, ColumnProperties> =
+                Object.keys(columnProperties).reduce(
+                    (acc, field) =>
+                        selectedItemIds.includes(field)
+                            ? {
+                                  ...acc,
+                                  [field]: columnProperties[field],
+                              }
+                            : acc,
+                    {},
+                );
+            // only update if something changed, otherwise we get into an infinite loop
+            if (
+                Object.keys(columnProperties).length !==
+                Object.keys(newColumnProperties).length
+            ) {
+                setColumnProperties(newColumnProperties);
+            }
         }
     }, [selectedItemIds, columnProperties]);
 
@@ -370,6 +417,7 @@ const useTableConfig = (
             showRowCalculation,
             showTableNames,
             showResultsTotal,
+            showSubtotals,
             columns: columnProperties,
             hideRowNumbers,
             conditionalFormattings,
@@ -381,6 +429,7 @@ const useTableConfig = (
             hideRowNumbers,
             showTableNames,
             showResultsTotal,
+            showSubtotals,
             columnProperties,
             conditionalFormattings,
             metricsAsRows,
@@ -401,6 +450,8 @@ const useTableConfig = (
         setHideRowNumbers,
         showResultsTotal,
         setShowResultsTotal,
+        showSubtotals,
+        setShowSubtotals,
         columnProperties,
         setColumnProperties,
         updateColumnProperty,
@@ -418,7 +469,8 @@ const useTableConfig = (
         pivotTableData,
         metricsAsRows,
         setMetricsAsRows,
-        canUsePivotTable,
+        isPivotTableEnabled,
+        canUseSubtotals,
     };
 };
 

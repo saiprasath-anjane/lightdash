@@ -1,9 +1,9 @@
 import {
-    ApiError,
-    OnboardingStatus,
-    ProjectSavedChartStatus,
+    type ApiError,
+    type OnboardingStatus,
+    type ProjectSavedChartStatus,
 } from '@lightdash/common';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import { lightdashApi } from '../api';
 
 const getOnboardingStatus = async () =>
@@ -28,10 +28,11 @@ const getProjectSavedChartStatus = async (projectUuid: string) =>
         body: undefined,
     });
 
-export const useProjectSavedChartStatus = (projectUuid: string) =>
+export const useProjectSavedChartStatus = (projectUuid: string | undefined) =>
     useQuery<ProjectSavedChartStatus, ApiError>({
         queryKey: [projectUuid, 'project-saved-chart-status'],
-        queryFn: () => getProjectSavedChartStatus(projectUuid),
+        queryFn: () => getProjectSavedChartStatus(projectUuid!),
         retry: false,
         refetchOnMount: true,
+        enabled: !!projectUuid,
     });

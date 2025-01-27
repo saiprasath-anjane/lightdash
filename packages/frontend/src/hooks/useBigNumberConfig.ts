@@ -1,25 +1,28 @@
 import {
-    ApiQueryResults,
-    BigNumber,
-    CompactOrAlias,
+    applyCustomFormat,
     ComparisonDiffTypes,
     ComparisonFormatTypes,
-    Format,
-    formatTableCalculationValue,
-    formatValue,
+    CustomFormatType,
+    formatItemValue,
     friendlyName,
+    getCustomFormatFromLegacy,
     getItemId,
     getItemLabel,
+    hasFormatOptions,
     isField,
     isMetric,
     isNumericItem,
     isTableCalculation,
-    ItemsMap,
     valueIsNaN,
+    type ApiQueryResults,
+    type BigNumber,
+    type CompactOrAlias,
+    type ItemsMap,
+    type TableCalculationMetadata,
 } from '@lightdash/common';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-const calculateComparisonValue = (
+export const calculateComparisonValue = (
     a: number,
     b: number,
     format: ComparisonFormatTypes | undefined,
@@ -42,7 +45,7 @@ const formatComparisonValue = (
     comparisonDiff: ComparisonDiffTypes | undefined,
     item: ItemsMap[string] | undefined,
     value: number | string,
-    bigNumberStyle: CompactOrAlias | undefined,
+    bigNumberComparisonStyle: CompactOrAlias | undefined,
 ) => {
     const prefix =
         comparisonDiff === ComparisonDiffTypes.POSITIVE ||
@@ -54,36 +57,42 @@ const formatComparisonValue = (
     }
     switch (format) {
         case ComparisonFormatTypes.PERCENTAGE:
-            return `${prefix}${formatValue(value, {
-                format: Format.PERCENT,
+            return `${prefix}${applyCustomFormat(value, {
                 round: 0,
+                type: CustomFormatType.PERCENT,
             })}`;
         case ComparisonFormatTypes.RAW:
             if (item !== undefined && isTableCalculation(item)) {
-                return `${prefix}${formatTableCalculationValue(item, value)}`;
+                return `${prefix}${formatItemValue(item, value)}`;
             }
-            return `${prefix}${formatValue(value, {
-                format: isField(item) ? item.format : undefined,
-                round: bigNumberStyle
-                    ? 2
-                    : isField(item)
-                    ? item.round
-                    : undefined,
-                compact: bigNumberStyle,
-            })}`;
+            return `${prefix}${applyCustomFormat(
+                value,
+                getCustomFormatFromLegacy({
+                    format: isField(item) ? item.format : undefined,
+                    round: bigNumberComparisonStyle
+                        ? 2
+                        : isField(item)
+                        ? item.round
+                        : undefined,
+                    compact: bigNumberComparisonStyle,
+                }),
+            )}`;
         default:
             if (item !== undefined && isTableCalculation(item)) {
-                return formatTableCalculationValue(item, value);
+                return formatItemValue(item, value);
             }
-            return formatValue(value, {
-                format: isField(item) ? item.format : undefined,
-                round: bigNumberStyle
-                    ? 2
-                    : isField(item)
-                    ? item.round
-                    : undefined,
-                compact: bigNumberStyle,
-            });
+            return applyCustomFormat(
+                value,
+                getCustomFormatFromLegacy({
+                    format: isField(item) ? item.format : undefined,
+                    round: bigNumberComparisonStyle
+                        ? 2
+                        : isField(item)
+                        ? item.round
+                        : undefined,
+                    compact: bigNumberComparisonStyle,
+                }),
+            );
     }
 };
 
@@ -104,6 +113,7 @@ const useBigNumberConfig = (
     bigNumberConfigData: BigNumber | undefined,
     resultsData: ApiQueryResults | undefined,
     itemsMap: ItemsMap | undefined,
+    tableCalculationsMetadata?: TableCalculationMetadata[],
 ) => {
     const availableFieldsIds = useMemo(() => {
         const itemsSortedByType = Object.values(itemsMap || {}).sort((a, b) => {
@@ -124,6 +134,25 @@ const useBigNumberConfig = (
 
     useEffect(() => {
         if (itemsMap && availableFieldsIds.length > 0 && bigNumberConfigData) {
+            if (tableCalculationsMetadata) {
+                /**
+                 * When table calculations update, their name changes, so we need to update the selected fields
+                 * If the selected field is a table calculation with the old name in the metadata, set it to the new name
+                 */
+                const selectedFieldTcIndex =
+                    tableCalculationsMetadata.findIndex(
+                        (tc) =>
+                            bigNumberConfigData?.selectedField === tc.oldName,
+                    );
+
+                if (selectedFieldTcIndex !== -1) {
+                    setSelectedField(
+                        tableCalculationsMetadata[selectedFieldTcIndex].name,
+                    );
+                    return;
+                }
+            }
+
             const selectedFieldExists =
                 bigNumberConfigData?.selectedField &&
                 getField(bigNumberConfigData?.selectedField) !== undefined;
@@ -143,6 +172,7 @@ const useBigNumberConfig = (
         selectedField,
         availableFieldsIds,
         getField,
+        tableCalculationsMetadata,
     ]);
 
     const item = useMemo(() => {
@@ -164,6 +194,9 @@ const useBigNumberConfig = (
         BigNumber['showBigNumberLabel'] | undefined
     >(bigNumberConfigData?.showBigNumberLabel);
     const [bigNumberStyle, setBigNumberStyle] = useState<
+        BigNumber['style'] | undefined
+    >(bigNumberConfigData?.style);
+    const [bigNumberComparisonStyle, setBigNumberComparisonStyle] = useState<
         BigNumber['style'] | undefined
     >(bigNumberConfigData?.style);
 
@@ -188,6 +221,7 @@ const useBigNumberConfig = (
         setShowBigNumberLabel(bigNumberConfigData?.showBigNumberLabel ?? true);
 
         setBigNumberStyle(bigNumberConfigData?.style);
+        setBigNumberComparisonStyle(bigNumberConfigData?.style);
 
         setShowComparison(bigNumberConfigData?.showComparison ?? false);
         setComparisonFormat(
@@ -217,23 +251,47 @@ const useBigNumberConfig = (
                 resultsData?.rows?.[0]?.[selectedField]?.value.formatted
             );
         } else if (item !== undefined && isTableCalculation(item)) {
-            return formatTableCalculationValue(item, firstRowValueRaw);
-        } else {
-            return formatValue(firstRowValueRaw, {
-                format: isField(item) ? item.format : undefined,
-                round: bigNumberStyle
-                    ? 2
-                    : isField(item)
-                    ? item.round
-                    : undefined,
-                compact: bigNumberStyle,
+            return formatItemValue(item, firstRowValueRaw);
+        } else if (item !== undefined && hasFormatOptions(item)) {
+            // Custom metrics case
+
+            // If the custom metric has no format, but the big number has
+            // compact, treat the custom metric as a number
+            const type =
+                item.formatOptions?.type === CustomFormatType.DEFAULT
+                    ? bigNumberStyle
+                        ? CustomFormatType.NUMBER
+                        : CustomFormatType.DEFAULT
+                    : item.formatOptions?.type;
+
+            return applyCustomFormat(firstRowValueRaw, {
+                ...item.formatOptions,
+                type,
+                compact: bigNumberStyle ?? item.formatOptions?.compact,
             });
+        } else {
+            return applyCustomFormat(
+                firstRowValueRaw,
+                getCustomFormatFromLegacy({
+                    format: isField(item) ? item.format : undefined,
+                    round: bigNumberStyle
+                        ? 2
+                        : isField(item)
+                        ? item.round
+                        : undefined,
+                    compact: bigNumberStyle,
+                }),
+            );
         }
     }, [item, firstRowValueRaw, selectedField, bigNumberStyle, resultsData]);
 
     const unformattedValue = useMemo(() => {
-        return isNumber(item, secondRowValueRaw) &&
-            isNumber(item, firstRowValueRaw)
+        // For backwards compatibility with old table calculations without type
+        const isCalculationTypeUndefined =
+            item && isTableCalculation(item) && item.type === undefined;
+        return (isNumber(item, secondRowValueRaw) &&
+            isNumber(item, firstRowValueRaw)) ||
+            isCalculationTypeUndefined
             ? calculateComparisonValue(
                   Number(firstRowValueRaw),
                   Number(secondRowValueRaw),
@@ -266,14 +324,14 @@ const useBigNumberConfig = (
                   comparisonDiff,
                   item,
                   unformattedValue,
-                  bigNumberStyle,
+                  bigNumberComparisonStyle,
               );
     }, [
         comparisonFormat,
         comparisonDiff,
         item,
         unformattedValue,
-        bigNumberStyle,
+        bigNumberComparisonStyle,
     ]);
 
     const comparisonTooltip = useMemo(() => {
@@ -326,6 +384,8 @@ const useBigNumberConfig = (
         validConfig,
         bigNumberStyle,
         setBigNumberStyle,
+        bigNumberComparisonStyle,
+        setBigNumberComparisonStyle,
         showStyle,
         selectedField,
         setSelectedField,

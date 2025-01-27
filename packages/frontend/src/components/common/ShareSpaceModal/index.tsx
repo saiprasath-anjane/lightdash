@@ -1,4 +1,4 @@
-import { Space } from '@lightdash/common';
+import { type Space } from '@lightdash/common';
 import {
     Anchor,
     Box,
@@ -11,17 +11,16 @@ import {
     useMantineTheme,
 } from '@mantine/core';
 import { IconFolderShare, IconLock, IconUsers } from '@tabler/icons-react';
-import { FC, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useOrganizationUsers } from '../../../hooks/useOrganizationUsers';
-import { useApp } from '../../../providers/AppProvider';
+import { useState, type FC } from 'react';
+import { Link } from 'react-router';
+import useApp from '../../../providers/App/useApp';
 import MantineIcon from '../MantineIcon';
 import { ShareSpaceAccessType } from './ShareSpaceAccessType';
 import { ShareSpaceAddUser } from './ShareSpaceAddUser';
 import {
-    AccessOption,
     SpaceAccessOptions,
     SpaceAccessType,
+    type AccessOption,
 } from './ShareSpaceSelect';
 import { ShareSpaceUserList } from './ShareSpaceUserList';
 
@@ -32,7 +31,6 @@ export interface ShareSpaceProps {
 
 const ShareSpaceModal: FC<ShareSpaceProps> = ({ space, projectUuid }) => {
     const theme = useMantineTheme();
-    const { data: organizationUsers } = useOrganizationUsers();
     const [selectedAccess, setSelectedAccess] = useState<AccessOption>(
         space.isPrivate ? SpaceAccessOptions[0] : SpaceAccessOptions[1],
     );
@@ -59,7 +57,7 @@ const ShareSpaceModal: FC<ShareSpaceProps> = ({ space, projectUuid }) => {
             </Button>
 
             <Modal
-                size="lg"
+                size="xl"
                 title={
                     <Group spacing="xs">
                         <MantineIcon size="lg" icon={IconFolderShare} />
@@ -76,13 +74,10 @@ const ShareSpaceModal: FC<ShareSpaceProps> = ({ space, projectUuid }) => {
             >
                 <>
                     <Stack p="md" pt={0}>
-                        {selectedAccess.value === SpaceAccessType.PRIVATE ? (
-                            <ShareSpaceAddUser
-                                space={space}
-                                projectUuid={projectUuid}
-                                organizationUsers={organizationUsers}
-                            />
-                        ) : null}
+                        <ShareSpaceAddUser
+                            space={space}
+                            projectUuid={projectUuid}
+                        />
 
                         <ShareSpaceAccessType
                             projectUuid={projectUuid}
@@ -91,14 +86,11 @@ const ShareSpaceModal: FC<ShareSpaceProps> = ({ space, projectUuid }) => {
                             setSelectedAccess={setSelectedAccess}
                         />
 
-                        {selectedAccess.value === SpaceAccessType.PRIVATE && (
-                            <ShareSpaceUserList
-                                projectUuid={projectUuid}
-                                space={space}
-                                sessionUser={sessionUser.data}
-                                organizationUsers={organizationUsers}
-                            />
-                        )}
+                        <ShareSpaceUserList
+                            projectUuid={projectUuid}
+                            space={space}
+                            sessionUser={sessionUser.data}
+                        />
                     </Stack>
 
                     <Box

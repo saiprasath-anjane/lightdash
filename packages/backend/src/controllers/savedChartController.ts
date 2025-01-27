@@ -1,15 +1,18 @@
 import {
+    AnyType,
     ApiCalculateTotalResponse,
     ApiErrorPayload,
     ApiGetChartHistoryResponse,
     ApiGetChartVersionResponse,
+    ApiJobScheduledResponse,
+    ApiPromoteChartResponse,
+    ApiPromotionChangesResponse,
     ApiSuccessEmpty,
     DateGranularity,
     SortField,
 } from '@lightdash/common';
 import {
     Body,
-    Controller,
     Get,
     Middlewares,
     OperationId,
@@ -22,18 +25,22 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
-import { projectService, savedChartsService } from '../services/services';
+import {
+    getContextFromHeader,
+    getContextFromQueryOrHeader,
+} from '../analytics/LightdashAnalytics';
 import {
     allowApiKeyAuthentication,
     isAuthenticated,
     unauthorisedInDemo,
 } from './authentication';
+import { BaseController } from './baseController';
 import { ApiRunQueryResponse } from './runQueryController';
 
 @Route('/api/v1/saved/{chartUuid}')
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('Charts')
-export class SavedChartController extends Controller {
+export class SavedChartController extends BaseController {
     /**
      * Run a query for a chart
      * @param chartUuid chartUuid for the chart to run
@@ -45,7 +52,7 @@ export class SavedChartController extends Controller {
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/results')
-    @OperationId('postChartResults')
+    @OperationId('PostChartResults')
     async postChartResults(
         @Body()
         body: {
@@ -57,11 +64,12 @@ export class SavedChartController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await projectService.runViewChartQuery({
+            results: await this.services.getProjectService().runViewChartQuery({
                 user: req.user!,
                 chartUuid,
                 versionUuid: undefined,
                 invalidateCache: body.invalidateCache,
+                context: getContextFromQueryOrHeader(req),
             }),
         };
     }
@@ -69,15 +77,16 @@ export class SavedChartController extends Controller {
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/chart-and-results')
-    @OperationId('postChartResults')
+    @OperationId('PostDashboardTile')
     async postDashboardTile(
         @Body()
         body: {
-            dashboardFilters: any; // DashboardFilters; temp disable validation
+            dashboardFilters: AnyType; // DashboardFilters; temp disable validation
             invalidateCache?: boolean;
             dashboardSorts: SortField[];
             dashboardUuid: string;
             granularity?: DateGranularity;
+            autoRefresh?: boolean;
         },
         @Path() chartUuid: string,
         @Request() req: express.Request,
@@ -85,15 +94,19 @@ export class SavedChartController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await projectService.getChartAndResults({
-                user: req.user!,
-                chartUuid,
-                dashboardFilters: body.dashboardFilters,
-                invalidateCache: body.invalidateCache,
-                dashboardSorts: body.dashboardSorts,
-                granularity: body.granularity,
-                dashboardUuid: body.dashboardUuid,
-            }),
+            results: await this.services
+                .getProjectService()
+                .getChartAndResults({
+                    user: req.user!,
+                    chartUuid,
+                    dashboardFilters: body.dashboardFilters,
+                    invalidateCache: body.invalidateCache,
+                    dashboardSorts: body.dashboardSorts,
+                    granularity: body.granularity,
+                    dashboardUuid: body.dashboardUuid,
+                    autoRefresh: body.autoRefresh,
+                    context: getContextFromQueryOrHeader(req),
+                }),
         };
     }
 
@@ -105,7 +118,7 @@ export class SavedChartController extends Controller {
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('/history')
-    @OperationId('get')
+    @OperationId('GetChartHistory')
     async getChartHistory(
         @Path() chartUuid: string,
         @Request() req: express.Request,
@@ -113,7 +126,9 @@ export class SavedChartController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await savedChartsService.getHistory(req.user!, chartUuid),
+            results: await this.services
+                .getSavedChartService()
+                .getHistory(req.user!, chartUuid),
         };
     }
 
@@ -126,7 +141,7 @@ export class SavedChartController extends Controller {
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('/version/{versionUuid}')
-    @OperationId('get')
+    @OperationId('GetChartVersion')
     async getChartVersion(
         @Path() chartUuid: string,
         @Path() versionUuid: string,
@@ -135,11 +150,9 @@ export class SavedChartController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await savedChartsService.getVersion(
-                req.user!,
-                chartUuid,
-                versionUuid,
-            ),
+            results: await this.services
+                .getSavedChartService()
+                .getVersion(req.user!, chartUuid, versionUuid),
         };
     }
 
@@ -159,12 +172,14 @@ export class SavedChartController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiRunQueryResponse> {
         this.setStatus(200);
+
         return {
             status: 'ok',
-            results: await projectService.runViewChartQuery({
+            results: await this.services.getProjectService().runViewChartQuery({
                 user: req.user!,
                 chartUuid,
                 versionUuid,
+                context: getContextFromHeader(req),
             }),
         };
     }
@@ -189,7 +204,9 @@ export class SavedChartController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
-        await savedChartsService.rollback(req.user!, chartUuid, versionUuid);
+        await this.services
+            .getSavedChartService()
+            .rollback(req.user!, chartUuid, versionUuid);
         return {
             status: 'ok',
             results: undefined,
@@ -209,21 +226,113 @@ export class SavedChartController extends Controller {
         @Path() chartUuid: string,
         @Body()
         body: {
-            dashboardFilters?: any; // DashboardFilters; temp disable validation
+            dashboardFilters?: AnyType; // DashboardFilters; temp disable validation
             invalidateCache?: boolean;
         },
         @Request() req: express.Request,
     ): Promise<ApiCalculateTotalResponse> {
         this.setStatus(200);
-        const totalResult = await projectService.calculateTotalFromSavedChart(
-            req.user!,
-            chartUuid,
-            body.dashboardFilters,
-            body.invalidateCache,
-        );
+        const totalResult = await this.services
+            .getProjectService()
+            .calculateTotalFromSavedChart(
+                req.user!,
+                chartUuid,
+                body.dashboardFilters,
+                body.invalidateCache,
+            );
         return {
             status: 'ok',
             results: totalResult,
+        };
+    }
+
+    /**
+     * Promote chart to its upstream project
+     * @param chartUuid chartUuid for the chart to run
+     * @param req express request
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('/promote')
+    @OperationId('promoteChart')
+    async promoteChart(
+        @Path() chartUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiPromoteChartResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getPromoteService()
+                .promoteChart(req.user!, chartUuid),
+        };
+    }
+
+    /**
+     * Get diff from chart to promote
+     * @param chartUuid chartUuid for the chart to check diff
+     * @param req express request
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/promoteDiff')
+    @OperationId('promoteChartDiff')
+    async promoteChartDiff(
+        @Path() chartUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiPromotionChangesResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getPromoteService()
+                .getPromoteChartDiff(req.user!, chartUuid),
+        };
+    }
+
+    /**
+     * Download a CSV from a saved chart uuid
+     * @param req express request
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/downloadCsv')
+    @OperationId('DownloadCsvFromSavedChart')
+    async DownloadCsvFromSavedChart(
+        @Request() req: express.Request,
+        @Path() chartUuid: string,
+        @Body()
+        body: {
+            dashboardFilters: AnyType; // DashboardFilters; temp disable validation
+            tileUuid?: string;
+            // Csv properties
+            onlyRaw: boolean;
+            csvLimit: number | null | undefined;
+        },
+    ): Promise<{ status: 'ok'; results: { jobId: string } }> {
+        this.setStatus(200);
+        const { dashboardFilters, onlyRaw, csvLimit, tileUuid } = body;
+
+        const { jobId } = await req.services
+            .getCsvService()
+            .scheduleDownloadCsvForChart(
+                req.user!,
+                chartUuid,
+                onlyRaw,
+                csvLimit,
+                tileUuid,
+                dashboardFilters,
+            );
+
+        return {
+            status: 'ok',
+            results: {
+                jobId,
+            },
         };
     }
 }

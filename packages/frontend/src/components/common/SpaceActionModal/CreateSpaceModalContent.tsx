@@ -1,27 +1,24 @@
 import {
     OrganizationMemberRole,
     ProjectMemberRole,
-    SpaceShare,
+    SpaceMemberRole,
+    type SpaceShare,
 } from '@lightdash/common';
 import { Avatar, Group, Radio, Stack, Text, TextInput } from '@mantine/core';
 import upperFirst from 'lodash/upperFirst';
-import { FC, useMemo, useState } from 'react';
-import { CreateSpaceModalBody } from '.';
+import { useMemo, useState, type FC } from 'react';
+import { type CreateSpaceModalBody } from '.';
 import { useProjectAccess } from '../../../hooks/useProjectAccess';
-import { useApp } from '../../../providers/AppProvider';
+import useApp from '../../../providers/App/useApp';
 import {
-    AccessOption,
     SpaceAccessOptions,
     SpaceAccessType,
     SpacePrivateAccessType,
+    type AccessOption,
 } from '../ShareSpaceModal/ShareSpaceSelect';
 import { CreateSpaceAddUser } from './CreateSpaceAddUser';
 import { CreateSpaceSelectAccessType } from './CreateSpaceSelectAccessType';
-
-export enum CreateModalStep {
-    SET_NAME = 'first',
-    SET_ACCESS = 'second',
-}
+import { CreateModalStep } from './types';
 
 const UserListItem: FC<{
     isYou?: boolean;
@@ -94,9 +91,15 @@ const CreateSpaceModalContent: FC<CreateSpaceModalBody> = ({
                 return [
                     ...acc,
                     {
-                        ...user,
+                        userUuid: userUuid,
                         firstName: user.firstName || user.email,
-                        role: ProjectMemberRole.ADMIN,
+                        lastName: user.lastName || '',
+                        email: user.email,
+                        role: SpaceMemberRole.EDITOR,
+                        hasDirectAccess: false,
+                        inheritedFrom: undefined,
+                        inheritedRole: undefined,
+                        projectRole: undefined,
                     },
                 ];
             } else return acc;

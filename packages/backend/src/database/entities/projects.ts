@@ -1,4 +1,5 @@
 import {
+    AnyType,
     DbtProjectType,
     ProjectType,
     TableSelectionType,
@@ -23,6 +24,9 @@ export type DbProject = {
     table_selection_value: string[] | null;
     copied_from_project_uuid: string | null;
     dbt_version: string;
+    semantic_layer_connection: Buffer | null;
+    scheduler_timezone: string;
+    created_by_user_uuid: string | null;
 };
 
 type CreateDbProject = Pick<
@@ -34,7 +38,11 @@ type CreateDbProject = Pick<
     | 'dbt_connection_type'
     | 'copied_from_project_uuid'
     | 'dbt_version'
->;
+    | 'semantic_layer_connection'
+    | 'created_by_user_uuid'
+> & {
+    scheduler_timezone?: string; // On create it will default to 'UTC' as per migration
+};
 type UpdateDbProject = Partial<
     Pick<
         DbProject,
@@ -44,6 +52,9 @@ type UpdateDbProject = Partial<
         | 'table_selection_type'
         | 'table_selection_value'
         | 'dbt_version'
+        | 'copied_from_project_uuid'
+        | 'semantic_layer_connection'
+        | 'scheduler_timezone'
     >
 >;
 
@@ -55,7 +66,7 @@ export type ProjectTable = Knex.CompositeTableType<
 
 export type DbCachedExplores = {
     project_uuid: string;
-    explores: any;
+    explores: AnyType;
 };
 
 export type CachedExploresTable = Knex.CompositeTableType<DbCachedExplores>;
@@ -65,7 +76,7 @@ export type DbCachedExplore = {
     project_uuid: string;
     name: string;
     table_names: string[];
-    explore: any;
+    explore: AnyType;
 };
 
 export type CachedExploreTable = Knex.CompositeTableType<
@@ -75,7 +86,7 @@ export type CachedExploreTable = Knex.CompositeTableType<
 
 export type DbCachedWarehouse = {
     project_uuid: string;
-    warehouse: any;
+    warehouse: AnyType;
 };
 
 export type CachedWarehouseTable = Knex.CompositeTableType<DbCachedWarehouse>;

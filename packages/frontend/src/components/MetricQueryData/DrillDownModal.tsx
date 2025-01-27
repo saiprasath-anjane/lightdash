@@ -1,31 +1,30 @@
 import {
     ChartType,
-    CompiledDimension,
-    CreateSavedChartVersion,
-    DashboardFilters,
-    FieldId,
-    fieldId as getFieldId,
-    FilterGroupItem,
     FilterOperator,
-    FilterRule,
-    Filters,
     getDimensions,
     getItemId,
     hashFieldReference,
     isField,
-    MetricQuery,
-    PivotReference,
-    ResultValue,
+    type CompiledDimension,
+    type CreateSavedChartVersion,
+    type DashboardFilters,
+    type FieldId,
+    type FilterGroupItem,
+    type FilterRule,
+    type Filters,
+    type MetricQuery,
+    type PivotReference,
+    type ResultValue,
 } from '@lightdash/common';
 import { Button, Group, Modal, Stack, Title } from '@mantine/core';
 import { IconExternalLink } from '@tabler/icons-react';
-import { FC, useCallback, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useMemo, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
 import FieldSelect from '../common/FieldSelect';
 import MantineIcon from '../common/MantineIcon';
-import { useMetricQueryDataContext } from './MetricQueryDataProvider';
+import { useMetricQueryDataContext } from './useMetricQueryDataContext';
 
 type CombineFiltersArgs = {
     fieldValues: Record<string, ResultValue>;
@@ -176,13 +175,19 @@ export const DrillDownModal: FC = () => {
             const fieldId =
                 drillDownConfig.pivotReference !== undefined
                     ? hashFieldReference(drillDownConfig.pivotReference)
-                    : getFieldId(drillDownConfig.item);
+                    : getItemId(drillDownConfig.item);
             return drillDownConfig.fieldValues[fieldId]?.formatted;
         }
     }, [drillDownConfig]);
 
     const url = useMemo(() => {
-        if (selectedDimension && metricQuery && explore && drillDownConfig) {
+        if (
+            selectedDimension &&
+            metricQuery &&
+            explore &&
+            drillDownConfig &&
+            projectUuid
+        ) {
             return drillDownExploreUrl({
                 projectUuid,
                 tableName: explore.name,
@@ -213,6 +218,7 @@ export const DrillDownModal: FC = () => {
                     item={selectedDimension}
                     items={dimensionsAvailable}
                     onChange={setSelectedDimension}
+                    hasGrouping
                 />
                 <Group position="right">
                     <Button variant="outline" onClick={onClose}>

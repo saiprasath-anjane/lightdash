@@ -1,6 +1,10 @@
-import { Explore, ExploreError } from './explore';
-import { DashboardFilterRule } from './filter';
-import { MetricQuery } from './metricQuery';
+import assertUnreachable from '../utils/assertUnreachable';
+import { type AnyType } from './any';
+import { type Explore, type ExploreError } from './explore';
+import { type DashboardFilterRule } from './filter';
+import { type MetricQuery } from './metricQuery';
+import { type PivotConfig } from './pivot';
+import { type ValidationTarget } from './validation';
 
 export type SchedulerCsvOptions = {
     formatted: boolean;
@@ -35,6 +39,12 @@ export enum SchedulerFormat {
     GSHEETS = 'gsheets',
 }
 
+export enum JobPriority {
+    HIGH = 0, // UI-waiting jobs (queries, download csv, compile)
+    MEDIUM = 1, // Related jobs (validate/catalogindex)
+    LOW = 2, // Background jobs (scheduled deliveries, sheets sync)
+}
+
 export type SchedulerLog = {
     task:
         | 'handleScheduledDelivery'
@@ -43,9 +53,14 @@ export type SchedulerLog = {
         | 'uploadGsheets'
         | 'downloadCsv'
         | 'uploadGsheetFromQuery'
+        | 'createProjectWithCompile'
         | 'compileProject'
         | 'testAndCompileProject'
-        | 'validateProject';
+        | 'validateProject'
+        | 'sqlRunner'
+        | 'sqlRunnerPivotQuery'
+        | 'semanticLayer'
+        | 'indexCatalog';
     schedulerUuid?: string;
     jobId: string;
     jobGroup?: string;
@@ -54,10 +69,51 @@ export type SchedulerLog = {
     status: SchedulerJobStatus;
     target?: string;
     targetType?: 'email' | 'slack' | 'gsheets';
-    details?: Record<string, any>;
+    details?: Record<string, AnyType>;
 };
 
 export type CreateSchedulerLog = Omit<SchedulerLog, 'createdAt'>;
+
+export enum ThresholdOperator {
+    GREATER_THAN = 'greaterThan',
+    LESS_THAN = 'lessThan',
+    INCREASED_BY = 'increasedBy',
+    DECREASED_BY = 'decreasedBy',
+    // HAS_CHANGED = '=',
+}
+
+export enum NotificationFrequency {
+    ALWAYS = 'always',
+    ONCE = 'once',
+    // DAILY = 'daily',
+}
+export const operatorActionValue = (
+    operator: ThresholdOperator,
+    value: number | string,
+    highlight: string = '*',
+) => {
+    switch (operator) {
+        case ThresholdOperator.GREATER_THAN:
+            return `exceeded ${highlight}${value}${highlight}`;
+        case ThresholdOperator.LESS_THAN:
+            return `fell below ${highlight}${value}${highlight}`;
+        case ThresholdOperator.INCREASED_BY:
+            return `increased by ${highlight}${value}%${highlight} or more`;
+        case ThresholdOperator.DECREASED_BY:
+            return `decreased by ${highlight}${value}%${highlight} or less`;
+        default:
+            assertUnreachable(
+                operator,
+                `Unknown threshold operator: ${operator}`,
+            );
+    }
+    return '';
+};
+export type ThresholdOptions = {
+    operator: ThresholdOperator;
+    fieldId: string;
+    value: number;
+};
 
 export type SchedulerBase = {
     schedulerUuid: string;
@@ -68,9 +124,14 @@ export type SchedulerBase = {
     createdBy: string;
     format: SchedulerFormat;
     cron: string;
+    timezone?: string;
     savedChartUuid: string | null;
     dashboardUuid: string | null;
     options: SchedulerOptions;
+    thresholds?: ThresholdOptions[]; // it can ben an array of AND conditions
+    enabled: boolean;
+    notificationFrequency?: NotificationFrequency;
+    includeLinks: boolean;
 };
 
 export type ChartScheduler = SchedulerBase & {
@@ -91,6 +152,7 @@ export type DashboardScheduler = SchedulerBase & {
     dashboardUuid: string;
     filters?: SchedulerFilterRule[];
     customViewportWidth?: number;
+    selectedTabs?: string[];
 };
 
 export type Scheduler = ChartScheduler | DashboardScheduler;
@@ -155,7 +217,16 @@ export type CreateSchedulerAndTargetsWithoutIds = Omit<
 
 export type UpdateSchedulerAndTargets = Pick<
     Scheduler,
-    'schedulerUuid' | 'name' | 'message' | 'cron' | 'format' | 'options'
+    | 'schedulerUuid'
+    | 'name'
+    | 'message'
+    | 'cron'
+    | 'timezone'
+    | 'format'
+    | 'options'
+    | 'thresholds'
+    | 'notificationFrequency'
+    | 'includeLinks'
 > &
     Pick<DashboardScheduler, 'filters' | 'customViewportWidth'> & {
         targets: Array<
@@ -330,6 +401,9 @@ export type DownloadCsvPayload = {
     columnOrder: string[];
     customLabels: Record<string, string> | undefined;
     hiddenFields: string[] | undefined;
+    chartName: string | undefined;
+    fromSavedChart: boolean;
+    pivotConfig?: PivotConfig;
 };
 
 export type ApiCsvUrlResponse = {
@@ -339,6 +413,15 @@ export type ApiCsvUrlResponse = {
         status: string;
         truncated: boolean;
     };
+};
+
+export type SchedulerCreateProjectWithCompilePayload = {
+    createdByUserUuid: string;
+    organizationUuid: string;
+    requestMethod: string;
+    isPreview: boolean;
+    data: string; // base64 string (CreateProject)
+    jobUuid: string;
 };
 
 export type CompileProjectPayload = {
@@ -356,6 +439,7 @@ export type ValidateProjectPayload = {
     userUuid: string;
     organizationUuid: string | undefined;
     explores?: (Explore | ExploreError)[];
+    validationTargets?: ValidationTarget[];
 };
 
 export type ApiJobScheduledResponse = {
@@ -369,6 +453,8 @@ export type ApiJobStatusResponse = {
     status: 'ok';
     results: {
         status: SchedulerJobStatus;
-        details: Record<string, any> | null;
+        details: Record<string, AnyType> | null;
     };
 };
+
+export type SchedulerCronUpdate = { schedulerUuid: string; cron: string };

@@ -1,35 +1,49 @@
 import { subject } from '@casl/ability';
+import { FeatureFlags } from '@lightdash/common';
 import { Button, Menu } from '@mantine/core';
 import {
     IconFolder,
     IconFolderPlus,
-    IconLayersIntersect,
+    IconLayersLinked,
     IconLayoutDashboard,
     IconSquareRoundedPlus,
     IconTable,
     IconTerminal2,
 } from '@tabler/icons-react';
-import { FC, memo, useState } from 'react';
-import { Link, useHistory } from 'react-router-dom';
-import { useApp } from '../../providers/AppProvider';
+import { memo, useState, type FC } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { useSemanticLayerInfo } from '../../features/semanticViewer/api/hooks';
+import { useFeatureFlagEnabled } from '../../hooks/useFeatureFlagEnabled';
+import useApp from '../../providers/App/useApp';
 import { Can } from '../common/Authorization';
 import LargeMenuItem from '../common/LargeMenuItem';
 import MantineIcon from '../common/MantineIcon';
 import DashboardCreateModal from '../common/modal/DashboardCreateModal';
-import SpaceActionModal, { ActionType } from '../common/SpaceActionModal';
+import SpaceActionModal from '../common/SpaceActionModal';
+import { ActionType } from '../common/SpaceActionModal/types';
 
 type Props = {
     projectUuid: string;
 };
 
 const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
-    const { user, health } = useApp();
-    const history = useHistory();
-    const [isOpen, setIsOpen] = useState<boolean>(false);
+    const navigate = useNavigate();
+    const location = useLocation();
 
-    const [isCreateSpaceOpen, setIsCreateSpaceOpen] = useState<boolean>(false);
-    const [isCreateDashboardOpen, setIsCreateDashboardOpen] =
-        useState<boolean>(false);
+    const isSemanticLayerEnabled = useFeatureFlagEnabled(
+        FeatureFlags.SemanticLayerEnabled,
+    );
+
+    const { user } = useApp();
+
+    const semanticLayerInfoQuery = useSemanticLayerInfo(
+        { projectUuid },
+        { enabled: isSemanticLayerEnabled },
+    );
+
+    const [isOpen, setIsOpen] = useState(false);
+    const [isCreateSpaceOpen, setIsCreateSpaceOpen] = useState(false);
+    const [isCreateDashboardOpen, setIsCreateDashboardOpen] = useState(false);
 
     return (
         <>
@@ -46,6 +60,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                     position="bottom-start"
                     arrowOffset={16}
                     offset={-2}
+                    withinPortal
                 >
                     <Menu.Target>
                         <Button
@@ -53,7 +68,10 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                             size="xs"
                             fz="sm"
                             leftIcon={
-                                <MantineIcon icon={IconSquareRoundedPlus} />
+                                <MantineIcon
+                                    color="#adb5bd"
+                                    icon={IconSquareRoundedPlus}
+                                />
                             }
                             onClick={() => setIsOpen(!isOpen)}
                             data-testid="ExploreMenu/NewButton"
@@ -70,15 +88,28 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                             to={`/projects/${projectUuid}/tables`}
                             icon={IconTable}
                         />
-                        {health.data?.hasDbtSemanticLayer && (
-                            <LargeMenuItem
-                                component={Link}
-                                title="Query using dbt Semantic Layer"
-                                description="Build queries with dbt Semantic Layer"
-                                to={`/projects/${projectUuid}/dbtsemanticlayer`}
-                                icon={IconLayersIntersect}
-                            />
-                        )}
+
+                        {isSemanticLayerEnabled &&
+                            semanticLayerInfoQuery.isSuccess &&
+                            semanticLayerInfoQuery.data !== null && (
+                                <Can
+                                    I="manage"
+                                    this={subject('SemanticViewer', {
+                                        organizationUuid:
+                                            user.data?.organizationUuid,
+                                        projectUuid,
+                                    })}
+                                >
+                                    <LargeMenuItem
+                                        component={Link}
+                                        title={`Query from ${semanticLayerInfoQuery.data.name} semantic layer`}
+                                        description={`Build queries using your ${semanticLayerInfoQuery.data.name} semantic layer connection`}
+                                        to={`/projects/${projectUuid}/semantic-viewer`}
+                                        icon={IconLayersLinked}
+                                    />
+                                </Can>
+                            )}
+
                         <Can
                             I="manage"
                             this={subject('SqlRunner', {
@@ -90,13 +121,28 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                                 component={Link}
                                 title="Query using SQL runner"
                                 description="Access your database to run ad-hoc queries."
-                                to={`/projects/${projectUuid}/sqlRunner`}
+                                to={`/projects/${projectUuid}/sql-runner`}
+                                onClick={(
+                                    event: React.MouseEvent<HTMLAnchorElement>,
+                                ) => {
+                                    if (
+                                        location.pathname.startsWith(
+                                            `/projects/${projectUuid}/sql-runner`,
+                                        )
+                                    ) {
+                                        event.preventDefault();
+                                        window.open(
+                                            `/projects/${projectUuid}/sql-runner`,
+                                            '_blank',
+                                        );
+                                    }
+                                }}
                                 icon={IconTerminal2}
                             />
                         </Can>
 
                         <Can
-                            I="manage"
+                            I="create"
                             this={subject('Dashboard', {
                                 organizationUuid: user.data?.organizationUuid,
                                 projectUuid,
@@ -112,7 +158,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                         </Can>
 
                         <Can
-                            I="manage"
+                            I="create"
                             this={subject('Space', {
                                 organizationUuid: user.data?.organizationUuid,
                                 projectUuid,
@@ -139,7 +185,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                     onClose={() => setIsCreateSpaceOpen(false)}
                     onSubmitForm={(space) => {
                         if (space)
-                            history.push(
+                            void navigate(
                                 `/projects/${projectUuid}/spaces/${space.uuid}`,
                             );
                     }}
@@ -151,7 +197,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                 opened={isCreateDashboardOpen}
                 onClose={() => setIsCreateDashboardOpen(false)}
                 onConfirm={(dashboard) => {
-                    history.push(
+                    void navigate(
                         `/projects/${projectUuid}/dashboards/${dashboard.uuid}/edit`,
                     );
 

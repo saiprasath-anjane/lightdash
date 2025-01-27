@@ -1,22 +1,27 @@
+import { FeatureFlags } from '@lightdash/common';
 import { Badge, Box, Group, Tooltip } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { FC, memo, useEffect } from 'react';
+import { useFeatureFlagEnabled } from 'posthog-js/react';
+import { memo, useEffect, useMemo, type FC } from 'react';
+import { useParams } from 'react-router';
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
-import { Can } from '../../common/Authorization';
+import { getExplorerUrlFromCreateSavedChartVersion } from '../../../hooks/useExplorerRoute';
+import useCreateInAnySpaceAccess from '../../../hooks/user/useCreateInAnySpaceAccess';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import MantineIcon from '../../common/MantineIcon';
 import ShareShortLinkButton from '../../common/ShareShortLinkButton';
-import ExploreFromHereButton from '../../ExploreFromHereButton';
+import TimeZonePicker from '../../common/TimeZonePicker';
 import { RefreshButton } from '../../RefreshButton';
 import RefreshDbtButton from '../../RefreshDbtButton';
 import SaveChartButton from '../SaveChartButton';
 
 const ExplorerHeader: FC = memo(() => {
-    const isEditMode = useExplorerContext(
-        (context) => context.state.isEditMode,
-    );
+    const { projectUuid } = useParams<{ projectUuid: string }>();
     const savedChart = useExplorerContext(
         (context) => context.state.savedChart,
+    );
+    const unsavedChartVersion = useExplorerContext(
+        (context) => context.state.unsavedChartVersion,
     );
     const isValidQuery = useExplorerContext(
         (context) => context.state.isValidQuery,
@@ -31,7 +36,33 @@ const ExplorerHeader: FC = memo(() => {
         (context) => context.state.unsavedChartVersion.metricQuery.limit,
     );
 
+    const selectedTimezone = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.metricQuery.timezone,
+    );
+    const setTimeZone = useExplorerContext(
+        (context) => context.actions.setTimeZone,
+    );
+
     const { getHasDashboardChanges } = useDashboardStorage();
+
+    const userCanCreateCharts = useCreateInAnySpaceAccess(
+        projectUuid,
+        'SavedChart',
+    );
+
+    const urlToShare = useMemo(() => {
+        if (unsavedChartVersion) {
+            const urlArgs = getExplorerUrlFromCreateSavedChartVersion(
+                projectUuid,
+                unsavedChartVersion,
+                true,
+            );
+            return {
+                pathname: urlArgs.pathname,
+                search: `?${urlArgs.search}`,
+            };
+        }
+    }, [unsavedChartVersion, projectUuid]);
 
     useEffect(() => {
         const checkReload = (event: BeforeUnloadEvent) => {
@@ -48,55 +79,59 @@ const ExplorerHeader: FC = memo(() => {
         };
     }, [getHasDashboardChanges]);
 
-    if (isEditMode) {
-        return (
-            <Group position="apart">
-                <Box>
-                    <RefreshDbtButton />
-                </Box>
-
-                <Group spacing="xs">
-                    {showLimitWarning && (
-                        <Tooltip
-                            width={400}
-                            label={`Query limit of ${limit} reached. There may be additional results that have not been displayed. To see more, increase the query limit or try narrowing filters.`}
-                            multiline
-                            position={'bottom'}
-                        >
-                            <Badge
-                                leftSection={
-                                    <MantineIcon
-                                        icon={IconAlertCircle}
-                                        size={'sm'}
-                                    />
-                                }
-                                color="yellow"
-                                variant="outline"
-                                tt="none"
-                                sx={{ cursor: 'help' }}
-                            >
-                                Results may be incomplete
-                            </Badge>
-                        </Tooltip>
-                    )}
-
-                    <RefreshButton size="xs" />
-
-                    {!savedChart && (
-                        <Can I="manage" a="SavedChart">
-                            <SaveChartButton isExplorer />
-                        </Can>
-                    )}
-                    <ShareShortLinkButton disabled={!isValidQuery} />
-                </Group>
-            </Group>
-        );
-    }
+    // FEATURE FLAG: this component doesn't appear when the feature flag is disabled
+    const userTimeZonesEnabled = useFeatureFlagEnabled(
+        FeatureFlags.EnableUserTimezones,
+    );
 
     return (
-        <Group position="right" spacing="xs">
-            <ExploreFromHereButton />
-            <ShareShortLinkButton disabled={!isValidQuery} />
+        <Group position="apart">
+            <Box>
+                <RefreshDbtButton />
+            </Box>
+
+            <Group spacing="xs">
+                {showLimitWarning && (
+                    <Tooltip
+                        width={400}
+                        label={`Query limit of ${limit} reached. There may be additional results that have not been displayed. To see more, increase the query limit or try narrowing filters.`}
+                        multiline
+                        position={'bottom'}
+                    >
+                        <Badge
+                            leftSection={
+                                <MantineIcon
+                                    icon={IconAlertCircle}
+                                    size={'sm'}
+                                />
+                            }
+                            color="yellow"
+                            variant="outline"
+                            tt="none"
+                            sx={{ cursor: 'help' }}
+                        >
+                            Results may be incomplete
+                        </Badge>
+                    </Tooltip>
+                )}
+
+                {userTimeZonesEnabled && (
+                    <TimeZonePicker
+                        onChange={setTimeZone}
+                        value={selectedTimezone}
+                    />
+                )}
+
+                <RefreshButton size="xs" />
+
+                {!savedChart && userCanCreateCharts && (
+                    <SaveChartButton isExplorer />
+                )}
+                <ShareShortLinkButton
+                    disabled={!isValidQuery}
+                    url={urlToShare}
+                />
+            </Group>
         </Group>
     );
 });

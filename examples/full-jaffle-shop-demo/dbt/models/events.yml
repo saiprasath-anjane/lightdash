@@ -1,11 +1,21 @@
 version: 2
 models:
   - name: events
+    meta:
+      group_details:
+        events:
+          label: Events
+          description: Events that happened in the Jaffle Shop
+        nested_group: 
+          label: nested group
+        another_nested_group: 
+          label: another nested group
     columns:
       - name: timestamp_tz
         description: ""
         meta:
           dimension:
+            label: 'Timestamp (with timezone)'
             type: timestamp
             time_intervals:
               - RAW
@@ -19,6 +29,7 @@ models:
               - DAY_OF_MONTH_NUM
               - DAY_OF_YEAR_NUM
               - WEEK
+              - WEEK_NUM
               - MONTH
               - MONTH_NUM
               - MONTH_NAME
@@ -27,6 +38,8 @@ models:
               - QUARTER_NAME
               - YEAR
               - YEAR_NUM
+              - HOUR_OF_DAY_NUM
+              - MINUTE_OF_HOUR_NUM
       - name: timestamp_ntz
         description: ""
         meta:
@@ -50,7 +63,7 @@ models:
         meta:
           dimension:
             type: string
-            group_label: 'Events'
+            groups: ['events']
           metrics:
             count:
               type: count
@@ -59,11 +72,26 @@ models:
         meta:
           dimension:
             type: number
-            group_label: 'Events'
+            groups: ['events', 'nested_group', 'another_nested_group']
+          additional_dimensions: 
+            event_tier: 
+              type: string
+              description: Ratio of event_id to event
+              sql: |
+                case 
+                  when ${event_id} < 100 then 'Low' 
+                  when ${event_id} < 1000 then 'High'
+                  else 'Very high' end
           metrics:
             in_gbp:
               type: sum
               format: 'gbp'
+            in_jpy:
+              type: sum
+              format: 'jpy'
+            in_dkk:
+              type: sum
+              format: 'dkk'
             in_eur:
               type: sum
               format: 'eur'
@@ -117,11 +145,11 @@ models:
             percentile_75:
               type: percentile
               percentile: 75
-            median: 
+            median:
               type: median
             with_filters:
               type: sum
               filters:
-              - event_id: "!null"
-              - event_id: ">5"
-              - event: "song_played"
+                - event_id: "!null"
+                - event_id: ">5"
+                - event: "song_played"

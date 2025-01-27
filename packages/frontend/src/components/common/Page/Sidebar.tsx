@@ -1,56 +1,74 @@
 import {
     Box,
-    Card,
-    CardProps,
     Flex,
-    FlexProps,
-    MantineTransition,
-    Stack,
+    getDefaultZIndex,
+    Paper,
     Transition,
+    type FlexProps,
+    type MantineTransition,
 } from '@mantine/core';
-import { FC } from 'react';
-
+import { type FC } from 'react';
 import useSidebarResize from '../../../hooks/useSidebarResize';
-import { TrackSection } from '../../../providers/TrackingProvider';
+import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
-
-const SIDEBAR_DEFAULT_WIDTH = 400;
-const SIDEBAR_MIN_WIDTH = 300;
-const SIDEBAR_MAX_WIDTH = 600;
-
-const SIDEBAR_RESIZE_HANDLE_WIDTH = 6;
+import {
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+    SIDEBAR_RESIZE_HANDLE_WIDTH,
+} from './constants';
+import { SidebarPosition, type SidebarWidthProps } from './types';
 
 type Props = {
     isOpen?: boolean;
     containerProps?: FlexProps;
-    cardProps?: CardProps;
+    position?: SidebarPosition;
+    widthProps?: SidebarWidthProps;
+    noSidebarPadding?: boolean;
+    mainWidth?: number;
+    onResizeStart?: () => void;
+    onResizeEnd?: () => void;
 };
 
-const Sidebar: FC<Props> = ({
+const Sidebar: FC<React.PropsWithChildren<Props>> = ({
     isOpen = true,
     containerProps,
-    cardProps,
+    position = SidebarPosition.LEFT,
+    widthProps = {},
+    mainWidth,
     children,
+    noSidebarPadding,
+    onResizeStart,
+    onResizeEnd,
 }) => {
+    const {
+        defaultWidth = SIDEBAR_DEFAULT_WIDTH,
+        minWidth = SIDEBAR_MIN_WIDTH,
+    } = widthProps;
     const { sidebarRef, sidebarWidth, isResizing, startResizing } =
         useSidebarResize({
-            defaultWidth: SIDEBAR_DEFAULT_WIDTH,
-            minWidth: SIDEBAR_MIN_WIDTH,
-            maxWidth: SIDEBAR_MAX_WIDTH,
+            defaultWidth,
+            minWidth,
+            position,
+            mainWidth,
+            onResizeStart,
+            onResizeEnd,
         });
 
     const transition: MantineTransition = {
         in: {
             opacity: 1,
-            marginLeft: 0,
+            ...(position === SidebarPosition.LEFT
+                ? { marginLeft: 0 }
+                : { marginRight: 0 }),
         },
         out: {
             opacity: 0,
-            marginLeft: -sidebarWidth,
+            ...(position === SidebarPosition.LEFT
+                ? { marginLeft: -sidebarWidth }
+                : { marginRight: -sidebarWidth }),
         },
         transitionProperty: 'opacity, margin',
     };
-
     return (
         <TrackSection name={SectionName.SIDEBAR}>
             <Flex
@@ -59,6 +77,7 @@ const Sidebar: FC<Props> = ({
                 pos="relative"
                 h="100%"
                 mah="100%"
+                sx={{ zIndex: 1 }}
                 {...containerProps}
             >
                 <Transition
@@ -68,31 +87,34 @@ const Sidebar: FC<Props> = ({
                 >
                     {(style) => (
                         <>
-                            <Card
-                                component={Stack}
-                                display="flex"
-                                radius="unset"
+                            <Paper
                                 shadow="lg"
-                                padding="lg"
+                                p={noSidebarPadding ? undefined : 'lg'}
                                 pb={0}
                                 w={sidebarWidth}
                                 style={style}
-                                sx={{ flexGrow: 1 }}
+                                sx={{
+                                    display: 'flex',
+                                    flexGrow: 1,
+                                    flexDirection: 'column',
+                                    overflowY: 'auto',
+                                }}
                             >
                                 {children}
-                            </Card>
+                            </Paper>
 
                             <Box
                                 h="100%"
                                 w={SIDEBAR_RESIZE_HANDLE_WIDTH}
                                 pos="absolute"
                                 top={0}
-                                right={-SIDEBAR_RESIZE_HANDLE_WIDTH}
+                                {...(position === SidebarPosition.LEFT
+                                    ? { right: -SIDEBAR_RESIZE_HANDLE_WIDTH }
+                                    : { left: -SIDEBAR_RESIZE_HANDLE_WIDTH })}
                                 onMouseDown={startResizing}
-                                {...cardProps}
                                 sx={(theme) => ({
                                     cursor: 'col-resize',
-
+                                    zIndex: getDefaultZIndex('app') + 1,
                                     ...(isResizing
                                         ? {
                                               background:

@@ -1,13 +1,13 @@
 import { DbtProjectType } from '@lightdash/common';
 import { Anchor, PasswordInput, TextInput } from '@mantine/core';
-import { FC } from 'react';
+import { type FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
     hasNoWhiteSpaces,
     isGitRepository,
     startWithSlash,
 } from '../../../utils/fieldValidators';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 
 const GitlabForm: FC<{ disabled: boolean }> = ({ disabled }) => {
     const { savedProject } = useProjectFormContext();

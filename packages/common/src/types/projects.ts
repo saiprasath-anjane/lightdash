@@ -1,6 +1,5 @@
-import assertUnreachable from '../utils/assertUnreachable';
-import { WeekDay } from '../utils/timeFrames';
-import { DbtManifestVersion } from './dbt';
+import { type WeekDay } from '../utils/timeFrames';
+import { type ProjectGroupAccess } from './projectGroupAccess';
 
 export enum ProjectType {
     DEFAULT = 'DEFAULT',
@@ -26,6 +25,11 @@ export enum WarehouseTypes {
     TRINO = 'trino',
 }
 
+export enum SemanticLayerType {
+    DBT = 'DBT',
+    CUBE = 'CUBE',
+}
+
 export type SshTunnelConfiguration = {
     useSshTunnel?: boolean;
     sshTunnelHost?: string;
@@ -43,10 +47,12 @@ export type CreateBigqueryCredentials = {
     timeoutSeconds: number | undefined;
     priority: 'interactive' | 'batch' | undefined;
     keyfileContents: Record<string, string>;
+    requireUserCredentials?: boolean;
     retries: number | undefined;
     location: string | undefined;
     maximumBytesBilled: number | undefined;
     startOfWeek?: WeekDay | null;
+    executionProject?: string;
 };
 export const sensitiveCredentialsFieldNames = [
     'user',
@@ -71,6 +77,7 @@ export type CreateDatabricksCredentials = {
     serverHostName: string;
     httpPath: string;
     personalAccessToken: string;
+    requireUserCredentials?: boolean;
     startOfWeek?: WeekDay | null;
 };
 export type DatabricksCredentials = Omit<
@@ -82,6 +89,7 @@ export type CreatePostgresCredentials = SshTunnelConfiguration & {
     host: string;
     user: string;
     password: string;
+    requireUserCredentials?: boolean;
     port: number;
     dbname: string;
     schema: string;
@@ -91,6 +99,7 @@ export type CreatePostgresCredentials = SshTunnelConfiguration & {
     role?: string;
     sslmode?: string;
     startOfWeek?: WeekDay | null;
+    timeoutSeconds?: number;
 };
 export type PostgresCredentials = Omit<
     CreatePostgresCredentials,
@@ -101,6 +110,7 @@ export type CreateTrinoCredentials = {
     host: string;
     user: string;
     password: string;
+    requireUserCredentials?: boolean;
     port: number;
     dbname: string;
     schema: string;
@@ -116,6 +126,7 @@ export type CreateRedshiftCredentials = SshTunnelConfiguration & {
     host: string;
     user: string;
     password: string;
+    requireUserCredentials?: boolean;
     port: number;
     dbname: string;
     schema: string;
@@ -124,6 +135,7 @@ export type CreateRedshiftCredentials = SshTunnelConfiguration & {
     sslmode?: string;
     ra3Node?: boolean;
     startOfWeek?: WeekDay | null;
+    timeoutSeconds?: number;
 };
 export type RedshiftCredentials = Omit<
     CreateRedshiftCredentials,
@@ -134,6 +146,7 @@ export type CreateSnowflakeCredentials = {
     account: string;
     user: string;
     password?: string;
+    requireUserCredentials?: boolean;
     privateKey?: string;
     privateKeyPass?: string;
     role?: string;
@@ -145,6 +158,8 @@ export type CreateSnowflakeCredentials = {
     queryTag?: string;
     accessUrl?: string;
     startOfWeek?: WeekDay | null;
+    quotedIdentifiersIgnoreCase?: boolean;
+    override?: string;
 };
 export type SnowflakeCredentials = Omit<
     CreateSnowflakeCredentials,
@@ -183,34 +198,28 @@ export enum SupportedDbtVersions {
     V1_5 = 'v1.5',
     V1_6 = 'v1.6',
     V1_7 = 'v1.7',
+    V1_8 = 'v1.8',
+    V1_9 = 'v1.9',
 }
 
-export const GetDbtManifestVersion = (
-    dbtVersion: SupportedDbtVersions,
-): DbtManifestVersion => {
-    switch (dbtVersion) {
-        case SupportedDbtVersions.V1_4:
-            return DbtManifestVersion.V8;
-        case SupportedDbtVersions.V1_5:
-            return DbtManifestVersion.V9;
-        case SupportedDbtVersions.V1_6:
-            return DbtManifestVersion.V10;
-        case SupportedDbtVersions.V1_7:
-            return DbtManifestVersion.V11;
-        default:
-            assertUnreachable(
-                dbtVersion,
-                'Missing dbt version manifest mapping',
-            );
-    }
-    return DbtManifestVersion.V8;
+// Make it an enum to avoid TSOA errors
+export enum DbtVersionOptionLatest {
+    LATEST = 'latest',
+}
+
+export type DbtVersionOption = SupportedDbtVersions | DbtVersionOptionLatest;
+
+export const getLatestSupportDbtVersion = (): SupportedDbtVersions => {
+    const versions = Object.values(SupportedDbtVersions);
+    return versions[versions.length - 1];
 };
 
-export const DefaultSupportedDbtVersion = SupportedDbtVersions.V1_4;
+export const DefaultSupportedDbtVersion = DbtVersionOptionLatest.LATEST;
 
 export interface DbtProjectCompilerBase extends DbtProjectConfigBase {
     target?: string;
     environment?: DbtProjectEnvironmentVariable[];
+    selector?: string;
 }
 
 export interface DbtNoneProjectConfig extends DbtProjectCompilerBase {
@@ -228,9 +237,8 @@ export interface DbtLocalProjectConfig extends DbtProjectCompilerBase {
 export interface DbtCloudIDEProjectConfig extends DbtProjectConfigBase {
     type: DbtProjectType.DBT_CLOUD_IDE;
     api_key: string;
-    account_id: string | number;
-    environment_id: string | number;
-    project_id: string | number;
+    environment_id: string;
+    discovery_api_endpoint?: string;
 }
 
 export interface DbtGithubProjectConfig extends DbtProjectCompilerBase {
@@ -279,6 +287,28 @@ export type DbtProjectConfig =
     | DbtGitlabProjectConfig
     | DbtAzureDevOpsProjectConfig
     | DbtNoneProjectConfig;
+
+export type DbtSemanticLayerConnection = {
+    type: SemanticLayerType.DBT;
+    environmentId: string;
+    domain: string;
+    token: string;
+};
+
+export type CubeSemanticLayerConnection = {
+    type: SemanticLayerType.CUBE;
+    domain: string;
+    token: string;
+};
+
+export type SemanticLayerConnection =
+    | DbtSemanticLayerConnection
+    | CubeSemanticLayerConnection;
+
+export type SemanticLayerConnectionUpdate =
+    | (Partial<DbtSemanticLayerConnection> & { type: SemanticLayerType.DBT })
+    | (Partial<CubeSemanticLayerConnection> & { type: SemanticLayerType.CUBE });
+
 export type Project = {
     organizationUuid: string;
     projectUuid: string;
@@ -287,13 +317,16 @@ export type Project = {
     dbtConnection: DbtProjectConfig;
     warehouseConnection?: WarehouseCredentials;
     pinnedListUuid?: string;
-    copiedFromProjectUuid?: string;
-    dbtVersion: SupportedDbtVersions;
+    upstreamProjectUuid?: string;
+    dbtVersion: DbtVersionOption;
+    semanticLayerConnection?: SemanticLayerConnection;
+    schedulerTimezone: string;
+    createdByUserUuid: string | null;
 };
 
 export type ProjectSummary = Pick<
     Project,
-    'name' | 'projectUuid' | 'organizationUuid' | 'type'
+    'name' | 'projectUuid' | 'organizationUuid' | 'type' | 'upstreamProjectUuid'
 >;
 
 export type ApiProjectResponse = {
@@ -301,14 +334,26 @@ export type ApiProjectResponse = {
     results: Project;
 };
 
+export type ApiGetProjectGroupAccesses = {
+    status: 'ok';
+    results: ProjectGroupAccess[];
+};
+
 export type IdContentMapping = {
     id: number | string;
     newId: number | string;
 };
+
 export type PreviewContentMapping = {
     charts: IdContentMapping[];
     chartVersions: IdContentMapping[];
     spaces: IdContentMapping[];
     dashboards: IdContentMapping[];
     dashboardVersions: IdContentMapping[];
+    savedSql: IdContentMapping[];
+    savedSqlVersions: IdContentMapping[];
+};
+
+export type UpdateSchedulerSettings = {
+    schedulerTimezone: string;
 };

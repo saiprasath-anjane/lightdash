@@ -1,38 +1,50 @@
 import {
     assertUnreachable,
+    AuthorizationError,
     BinType,
+    CompiledCustomSqlDimension,
     CompiledDimension,
     CompiledMetricQuery,
+    CompiledTable,
+    createFilterRuleFromRequiredMetricRule,
+    CustomBinDimension,
     CustomDimension,
     DbtModelJoinType,
     Explore,
-    fieldId,
     FieldId,
     FieldReferenceError,
     FieldType,
     FilterGroup,
     FilterRule,
     ForbiddenError,
-    getCustomDimensionId,
     getCustomMetricDimensionId,
     getDateDimension,
     getDimensions,
+    getFieldQuoteChar,
     getFieldsFromMetricQuery,
     getFilterRulesFromGroup,
+    getItemId,
     getMetrics,
     getSqlForTruncatedDate,
+    IntrinsicUserAttributes,
     isAndFilterGroup,
+    isCompiledCustomSqlDimension,
+    isCustomBinDimension,
     isFilterGroup,
+    isFilterRuleInQuery,
     ItemsMap,
+    MetricFilterRule,
     parseAllReferences,
     renderFilterRuleSql,
     renderTableCalculationFilterRuleSql,
     SortField,
     SupportedDbtAdapter,
+    TimeFrames,
     UserAttributeValueMap,
     WarehouseClient,
     WeekDay,
 } from '@lightdash/common';
+import { isArray } from 'lodash';
 import { hasUserAttribute } from './services/UserAttributesService/UserAttributeUtils';
 
 const getDimensionFromId = (
@@ -42,7 +54,7 @@ const getDimensionFromId = (
     startOfWeek: WeekDay | null | undefined,
 ): CompiledDimension => {
     const dimensions = getDimensions(explore);
-    const dimension = dimensions.find((d) => fieldId(d) === dimId);
+    const dimension = dimensions.find((d) => getItemId(d) === dimId);
 
     if (dimension === undefined) {
         const { baseDimensionId, newTimeFrame } = getDateDimension(dimId);
@@ -68,11 +80,48 @@ const getDimensionFromId = (
                 };
         }
 
+        // At this point, we couldn't find the dimension with the given id in the explore
+        // it is possible that the explore is a joined table and is filtered by user_attributes
+        // So we check if the dimension exists in the unfiltered tables
+        if (
+            explore.unfilteredTables &&
+            getDimensionFromId(
+                dimId,
+                { ...explore, tables: explore.unfilteredTables },
+                adapterType,
+                startOfWeek,
+            )
+        ) {
+            throw new AuthorizationError(
+                "You don't have authorization to access this explore",
+            );
+        }
         throw new FieldReferenceError(
             `Tried to reference dimension with unknown field id: ${dimId}`,
         );
     }
     return dimension;
+};
+
+const getDimensionFromFilterTargetId = (
+    filterTargetId: FieldId,
+    explore: Explore,
+    compiledCustomDimensions: CompiledCustomSqlDimension[],
+    adapterType: SupportedDbtAdapter,
+    startOfWeek: WeekDay | null | undefined,
+): CompiledDimension | CompiledCustomSqlDimension => {
+    const dim = compiledCustomDimensions.find(
+        (cd) => getItemId(cd) === filterTargetId,
+    );
+    if (dim && isCompiledCustomSqlDimension(dim)) {
+        return dim;
+    }
+    return getDimensionFromId(
+        filterTargetId,
+        explore,
+        adapterType,
+        startOfWeek,
+    );
 };
 
 const getMetricFromId = (
@@ -84,7 +133,7 @@ const getMetricFromId = (
         ...getMetrics(explore),
         ...(compiledMetricQuery.compiledAdditionalMetrics || []),
     ];
-    const metric = metrics.find((m) => fieldId(m) === metricId);
+    const metric = metrics.find((m) => getItemId(m) === metricId);
     if (metric === undefined)
         throw new FieldReferenceError(
             `Tried to reference metric with unknown field id: ${metricId}`,
@@ -92,40 +141,82 @@ const getMetricFromId = (
     return metric;
 };
 
+const replaceAttributes = (
+    regex: RegExp,
+    sqlFilter: string,
+    userAttributes: Record<string, string | string[]>,
+    stringQuoteChar: string,
+    filter: string,
+): string => {
+    const sqlAttributes = sqlFilter.match(regex);
+
+    if (sqlAttributes === null || sqlAttributes.length === 0) {
+        return sqlFilter;
+    }
+
+    const replacedUserAttributesSql = sqlAttributes.reduce<string>(
+        (acc, sqlAttribute) => {
+            const attribute = sqlAttribute.replace(regex, '$1');
+            const attributeValues = userAttributes[attribute];
+
+            if (attributeValues === undefined) {
+                throw new ForbiddenError(
+                    `Missing user attribute "${attribute}" on ${filter}: "${sqlFilter}"`,
+                );
+            }
+            if (attributeValues.length === 0) {
+                throw new ForbiddenError(
+                    `Invalid or missing user attribute "${attribute}" on ${filter}: "${sqlFilter}"`,
+                );
+            }
+
+            const valueString = isArray(attributeValues)
+                ? attributeValues
+                      .map(
+                          (attributeValue) =>
+                              `${stringQuoteChar}${attributeValue}${stringQuoteChar}`,
+                      )
+                      .join(', ')
+                : `${stringQuoteChar}${attributeValues}${stringQuoteChar}`;
+
+            return acc.replace(sqlAttribute, valueString);
+        },
+        sqlFilter,
+    );
+
+    // NOTE: Wrap the replaced user attributes in parentheses to avoid issues with AND/OR operators
+    return `(${replacedUserAttributesSql})`;
+};
+
 export const replaceUserAttributes = (
     sqlFilter: string,
+    intrinsicUserAttributes: IntrinsicUserAttributes,
     userAttributes: UserAttributeValueMap,
     stringQuoteChar: string = "'",
     filter: string = 'sql_filter',
 ): string => {
     const userAttributeRegex =
         /\$\{(?:lightdash|ld)\.(?:attribute|attributes|attr)\.(\w+)\}/g;
-    const sqlAttributes = sqlFilter.match(userAttributeRegex);
+    const intrinsicUserAttributeRegex =
+        /\$\{(?:lightdash|ld)\.(?:user)\.(\w+)\}/g;
 
-    if (sqlAttributes === null || sqlAttributes.length === 0) {
-        return sqlFilter;
-    }
+    // Replace user attributes in the SQL filter
+    const replacedSqlFilter = replaceAttributes(
+        userAttributeRegex,
+        sqlFilter,
+        userAttributes,
+        stringQuoteChar,
+        filter,
+    );
 
-    return sqlAttributes.reduce<string>((acc, sqlAttribute) => {
-        const attribute = sqlAttribute.replace(userAttributeRegex, '$1');
-        const userValue: string | null | undefined = userAttributes[attribute];
-
-        if (userValue === undefined) {
-            throw new ForbiddenError(
-                `Missing user attribute "${attribute}" on ${filter}: "${sqlFilter}"`,
-            );
-        }
-        if (userValue === null) {
-            throw new ForbiddenError(
-                `Invalid or missing user attribute "${attribute}" on ${filter}: "${sqlFilter}"`,
-            );
-        }
-
-        return acc.replace(
-            sqlAttribute,
-            `${stringQuoteChar}${userValue}${stringQuoteChar}`,
-        );
-    }, sqlFilter);
+    // Replace intrinsic user attributes in the SQL filter
+    return replaceAttributes(
+        intrinsicUserAttributeRegex,
+        replacedSqlFilter,
+        intrinsicUserAttributes,
+        stringQuoteChar,
+        filter,
+    );
 };
 
 export const assertValidDimensionRequiredAttribute = (
@@ -160,13 +251,6 @@ export const assertValidDimensionRequiredAttribute = (
         });
 };
 
-export type BuildQueryProps = {
-    explore: Explore;
-    compiledMetricQuery: CompiledMetricQuery;
-    warehouseClient: WarehouseClient;
-    userAttributes?: UserAttributeValueMap;
-};
-
 const getJoinType = (type: DbtModelJoinType = 'left') => {
     switch (type) {
         case 'inner':
@@ -182,30 +266,232 @@ const getJoinType = (type: DbtModelJoinType = 'left') => {
     }
 };
 
-export const getCustomDimensionSql = ({
+export const sortMonthName = (
+    dimension: CompiledDimension,
+    fieldQuoteChar: string,
+    descending: Boolean,
+) => {
+    const fieldId = `${fieldQuoteChar}${getItemId(dimension)}${fieldQuoteChar}`;
+
+    return `(
+        CASE
+            WHEN ${fieldId} = 'January' THEN 1
+            WHEN ${fieldId} = 'February' THEN 2
+            WHEN ${fieldId} = 'March' THEN 3
+            WHEN ${fieldId} = 'April' THEN 4
+            WHEN ${fieldId} = 'May' THEN 5
+            WHEN ${fieldId} = 'June' THEN 6
+            WHEN ${fieldId} = 'July' THEN 7
+            WHEN ${fieldId} = 'August' THEN 8
+            WHEN ${fieldId} = 'September' THEN 9
+            WHEN ${fieldId} = 'October' THEN 10
+            WHEN ${fieldId} = 'November' THEN 11
+            WHEN ${fieldId} = 'December' THEN 12
+            ELSE 0
+        END
+        )${descending ? ' DESC' : ''}`;
+};
+export const sortDayOfWeekName = (
+    dimension: CompiledDimension,
+    startOfWeek: WeekDay | null | undefined,
+    fieldQuoteChar: string,
+    descending: Boolean,
+) => {
+    const fieldId = `${fieldQuoteChar}${getItemId(dimension)}${fieldQuoteChar}`;
+    const calculateDayIndex = (dayNumber: number) => {
+        if (startOfWeek === null || startOfWeek === undefined) return dayNumber; // startOfWeek can be 0, so don't do !startOfWeek
+        return ((dayNumber + 7 - (startOfWeek + 2)) % 7) + 1;
+    };
+    return `(
+        CASE
+            WHEN ${fieldId} = 'Sunday' THEN ${calculateDayIndex(1)}
+            WHEN ${fieldId} = 'Monday' THEN ${calculateDayIndex(2)}
+            WHEN ${fieldId} = 'Tuesday' THEN ${calculateDayIndex(3)}
+            WHEN ${fieldId} = 'Wednesday' THEN ${calculateDayIndex(4)}
+            WHEN ${fieldId} = 'Thursday' THEN ${calculateDayIndex(5)}
+            WHEN ${fieldId} = 'Friday' THEN ${calculateDayIndex(6)}
+            WHEN ${fieldId} = 'Saturday' THEN ${calculateDayIndex(7)}
+            ELSE 0
+        END
+    )${descending ? ' DESC' : ''}`;
+};
+// Remove comments and limit clauses from SQL
+const removeComments = (sql: string): string => {
+    let s = sql.trim();
+    // remove single-line comments
+    s = s.replace(/--.*$/gm, '');
+    // remove multi-line comments
+    s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+    return s;
+};
+
+// Replace strings with placeholders and return the placeholders
+const replaceStringsWithPlaceholders = (
+    sql: string,
+): { sqlWithoutStrings: string; placeholders: string[] } => {
+    const stringRegex = /('([^'\\]|\\.)*')|("([^"\\]|\\.)*")/gm;
+    const placeholders: string[] = [];
+    let index = 0;
+    const sqlWithoutStrings = sql.replace(stringRegex, (match) => {
+        placeholders.push(match);
+        // eslint-disable-next-line no-plusplus
+        return `__string_placeholder_${index++}__`;
+    });
+    return { sqlWithoutStrings, placeholders };
+};
+
+// Restore strings from placeholders
+const restoreStringsFromPlaceholders = (
+    sql: string,
+    placeholders: string[],
+): string =>
+    sql.replace(
+        /__string_placeholder_(\d+)__/g,
+        (_, p1) => placeholders[Number(p1)],
+    );
+
+interface LimitOffsetClause {
+    limit: number;
+    offset?: number;
+}
+
+// Extract the outer limit and offset clauses from a SQL query
+const extractOuterLimitOffsetFromSQL = (
+    sql: string,
+): LimitOffsetClause | undefined => {
+    let s = sql.trim();
+    // remove comments
+    s = removeComments(s);
+    // replace strings with placeholders
+    const { sqlWithoutStrings } = replaceStringsWithPlaceholders(s);
+    // match both LIMIT and optional OFFSET in any order
+    const limitOffsetRegex =
+        /\b(?:(?:limit\s+(\d+)(?:\s+offset\s+(\d+))?)|(?:offset\s+(\d+)\s+limit\s+(\d+)))\s*(?:;|\s*$)/gi;
+    const matches = [...sqlWithoutStrings.matchAll(limitOffsetRegex)];
+    if (matches.length > 0) {
+        const lastMatch = matches[matches.length - 1];
+        // If LIMIT comes first
+        if (lastMatch[1] !== undefined) {
+            return {
+                limit: parseInt(lastMatch[1], 10),
+                offset: lastMatch[2] ? parseInt(lastMatch[2], 10) : undefined,
+            };
+        }
+        // If OFFSET comes first
+        if (lastMatch[3] !== undefined) {
+            return {
+                limit: parseInt(lastMatch[4], 10),
+                offset: parseInt(lastMatch[3], 10),
+            };
+        }
+    }
+    return undefined;
+};
+
+// Remove the outermost limit and offset clauses from SQL
+const removeCommentsAndOuterLimitOffset = (sql: string): string => {
+    let s = sql.trim();
+    // remove comments
+    s = removeComments(s);
+    // replace strings with placeholders
+    const { sqlWithoutStrings, placeholders } =
+        replaceStringsWithPlaceholders(s);
+    // remove either "LIMIT x OFFSET y" or "OFFSET y LIMIT x" at the end of the query
+    const limitOffsetRegex =
+        /(\b(?:(?:limit\s+\d+(?:\s+offset\s+\d+)?)|(?:offset\s+\d+\s+limit\s+\d+))\s*(?:;|\s*)?)$/i;
+    let sqlWithoutLimit = sqlWithoutStrings.replace(limitOffsetRegex, '');
+    // remove semicolon from the end of the query
+    sqlWithoutLimit = sqlWithoutLimit.trim().replace(/;+$/g, '');
+    // restore strings
+    let sqlRestored = restoreStringsFromPlaceholders(
+        sqlWithoutLimit,
+        placeholders,
+    );
+    // normalize multiple spaces to a single space
+    sqlRestored = sqlRestored.replace(/\s+/g, ' ');
+    // remove any trailing semicolons, including those preceded by whitespace
+    sqlRestored = sqlRestored.replace(/\s*;+\s*$/g, '').trim();
+    return sqlRestored;
+};
+
+// Apply a limit (and optional offset) to a SQL query
+export const applyLimitToSqlQuery = ({
+    sqlQuery,
+    limit,
+}: {
+    sqlQuery: string;
+    limit: number | undefined;
+}): string => {
+    // do nothing if limit is undefined
+    if (limit === undefined) {
+        // strip any trailing semicolons and comments
+        let sql = sqlQuery.trim().replace(/;+$/g, '');
+        sql = removeComments(sql);
+        return sql.trim();
+    }
+    // get any existing outer limit and offset from the SQL query
+    const existingLimitOffset = extractOuterLimitOffsetFromSQL(sqlQuery);
+    // calculate the new limit
+    const limitToAppend =
+        existingLimitOffset?.limit !== undefined
+            ? Math.min(existingLimitOffset.limit, limit)
+            : limit;
+    // remove comments and limit/offset clauses from the SQL query
+    const sqlWithoutCommentsAndLimits =
+        removeCommentsAndOuterLimitOffset(sqlQuery);
+    // append the limit and offset (if any) to the SQL query
+    let result = `${sqlWithoutCommentsAndLimits} LIMIT ${limitToAppend}`;
+    if (existingLimitOffset?.offset !== undefined) {
+        result += ` OFFSET ${existingLimitOffset.offset}`;
+    }
+    return result;
+};
+
+export const getCustomSqlDimensionSql = ({
+    warehouseClient,
+    customDimensions,
+}: {
+    warehouseClient: WarehouseClient;
+    customDimensions: CompiledCustomSqlDimension[] | undefined;
+}): { selects: string[]; tables: string[] } | undefined => {
+    if (customDimensions === undefined || customDimensions.length === 0) {
+        return undefined;
+    }
+    const fieldQuoteChar = getFieldQuoteChar(warehouseClient.credentials.type);
+    const selects = customDimensions.map<string>(
+        (customDimension) =>
+            `  (${customDimension.compiledSql}) AS ${fieldQuoteChar}${customDimension.id}${fieldQuoteChar}`,
+    );
+
+    return {
+        selects,
+        tables: customDimensions.flatMap((d) => d.tablesReferences),
+    };
+};
+
+export const getCustomBinDimensionSql = ({
     warehouseClient,
     explore,
-    compiledMetricQuery,
+    customDimensions,
     userAttributes = {},
     sorts = [],
 }: {
     warehouseClient: WarehouseClient;
     explore: Explore;
-    compiledMetricQuery: CompiledMetricQuery;
+    customDimensions: CustomBinDimension[] | undefined;
     userAttributes: UserAttributeValueMap | undefined;
     sorts: SortField[] | undefined;
 }):
     | { ctes: string[]; joins: string[]; tables: string[]; selects: string[] }
     | undefined => {
-    const { customDimensions } = compiledMetricQuery;
     const startOfWeek = warehouseClient.getStartOfWeek();
 
-    const fieldQuoteChar = warehouseClient.getFieldQuoteChar();
+    const fieldQuoteChar = getFieldQuoteChar(warehouseClient.credentials.type);
     if (customDimensions === undefined || customDimensions.length === 0)
         return undefined;
 
     const getCteReference = (customDimension: CustomDimension) =>
-        `${getCustomDimensionId(customDimension)}_cte`;
+        `${getItemId(customDimension)}_cte`;
 
     const adapterType: SupportedDbtAdapter = warehouseClient.getAdapterType();
     const ctes = customDimensions.reduce<string[]>((acc, customDimension) => {
@@ -281,10 +567,10 @@ export const getCustomDimensionSql = ({
                 `custom dimension: "${customDimension.name}"`,
             );
 
-            const customDimensionName = `${fieldQuoteChar}${getCustomDimensionId(
+            const customDimensionName = `${fieldQuoteChar}${getItemId(
                 customDimension,
             )}${fieldQuoteChar}`;
-            const customDimensionOrder = `${fieldQuoteChar}${getCustomDimensionId(
+            const customDimensionOrder = `${fieldQuoteChar}${getItemId(
                 customDimension,
             )}_order${fieldQuoteChar}`;
             const cte = `${getCteReference(customDimension)}`;
@@ -295,11 +581,11 @@ export const getCustomDimensionSql = ({
                 sorts.length > 0 &&
                 sorts.find(
                     (sortField) =>
-                        getCustomDimensionId(customDimension) ===
-                        sortField.fieldId,
+                        getItemId(customDimension) === sortField.fieldId,
                 );
             const quoteChar = warehouseClient.getStringQuoteChar();
             const dash = `${quoteChar} - ${quoteChar}`;
+
             switch (customDimension.binType) {
                 case BinType.FIXED_WIDTH:
                     if (!customDimension.binWidth) {
@@ -349,7 +635,7 @@ export const getCustomDimensionSql = ({
                     const to = (i: number) =>
                         `${cte}.min_id + ${binWidth} * ${i + 1}`;
 
-                    const whens = Array.from(
+                    const binWhens = Array.from(
                         Array(customDimension.binNumber).keys(),
                     ).map((i) => {
                         if (i !== customDimension.binNumber! - 1) {
@@ -370,8 +656,14 @@ export const getCustomDimensionSql = ({
                         )}`;
                     });
 
+                    // Add a NULL case for when the dimension is NULL, returning null as the value so it get's correctly formated with the symbol ∅
+                    const whens = [
+                        `WHEN ${dimension.compiledSql} IS NULL THEN NULL`,
+                        ...binWhens,
+                    ];
+
                     if (isSorted) {
-                        const sortWhens = Array.from(
+                        const sortBinWhens = Array.from(
                             Array(customDimension.binNumber).keys(),
                         ).map((i) => {
                             if (i !== customDimension.binNumber! - 1) {
@@ -383,6 +675,11 @@ export const getCustomDimensionSql = ({
                             }
                             return `ELSE ${i}`;
                         });
+
+                        const sortWhens = [
+                            `WHEN ${dimension.compiledSql} IS NULL THEN ${customDimension.binNumber}`,
+                            ...sortBinWhens,
+                        ];
 
                         return [
                             ...acc,
@@ -412,7 +709,7 @@ export const getCustomDimensionSql = ({
                         );
                     }
 
-                    const rangeWhens = customDimension.customRange.map(
+                    const binRangeWhens = customDimension.customRange.map(
                         (range) => {
                             if (range.from === undefined) {
                                 // First range
@@ -443,14 +740,20 @@ export const getCustomDimensionSql = ({
                         },
                     );
 
+                    // Add a NULL case for when the dimension is NULL, returning null as the value so it get's correctly formated with the symbol ∅
+                    const rangeWhens = [
+                        `WHEN ${dimension.compiledSql} IS NULL THEN NULL`,
+                        ...binRangeWhens,
+                    ];
+
                     const customRangeSql = `CASE
                         ${rangeWhens.join('\n')}
                         END
                         AS ${customDimensionName}`;
 
                     if (isSorted) {
-                        const sortedWhens = customDimension.customRange.map(
-                            (range, i) => {
+                        const sortedRangeWhens =
+                            customDimension.customRange.map((range, i) => {
                                 if (range.from === undefined) {
                                     return `WHEN ${dimension.compiledSql} < ${range.to} THEN ${i}`;
                                 }
@@ -459,8 +762,12 @@ export const getCustomDimensionSql = ({
                                 }
 
                                 return `WHEN ${dimension.compiledSql} >= ${range.from} AND ${dimension.compiledSql} < ${range.to} THEN ${i}`;
-                            },
-                        );
+                            });
+
+                        const sortedWhens = [
+                            `WHEN ${dimension.compiledSql} IS NULL THEN ${customDimension.customRange.length}`,
+                            ...sortedRangeWhens,
+                        ];
 
                         return [
                             ...acc,
@@ -488,17 +795,54 @@ export const getCustomDimensionSql = ({
     return { ctes, joins, tables: [...new Set(tables)], selects };
 };
 
+const getJoinedTables = (explore: Explore, tableNames: string[]): string[] => {
+    if (tableNames.length === 0) {
+        return [];
+    }
+    const allNewReferences = explore.joinedTables.reduce<string[]>(
+        (sum, joinedTable) => {
+            if (tableNames.includes(joinedTable.table)) {
+                const newReferencesInJoin = parseAllReferences(
+                    joinedTable.sqlOn,
+                    joinedTable.table,
+                ).reduce<string[]>(
+                    (acc, { refTable }) =>
+                        !tableNames.includes(refTable)
+                            ? [...acc, refTable]
+                            : acc,
+                    [],
+                );
+                return [...sum, ...newReferencesInJoin];
+            }
+            return sum;
+        },
+        [],
+    );
+    return [...allNewReferences, ...getJoinedTables(explore, allNewReferences)];
+};
+
 export type CompiledQuery = {
     query: string;
     hasExampleMetric: boolean;
     fields: ItemsMap;
 };
 
+export type BuildQueryProps = {
+    explore: Explore;
+    compiledMetricQuery: CompiledMetricQuery;
+    warehouseClient: WarehouseClient;
+    userAttributes?: UserAttributeValueMap;
+    intrinsicUserAttributes: IntrinsicUserAttributes;
+    timezone: string;
+};
+
 export const buildQuery = ({
     explore,
     compiledMetricQuery,
     warehouseClient,
+    intrinsicUserAttributes,
     userAttributes = {},
+    timezone,
 }: BuildQueryProps): CompiledQuery => {
     let hasExampleMetric: boolean = false;
     const fields = getFieldsFromMetricQuery(compiledMetricQuery, explore);
@@ -510,37 +854,54 @@ export const buildQuery = ({
         sorts,
         limit,
         additionalMetrics,
-        customDimensions,
+        compiledCustomDimensions,
     } = compiledMetricQuery;
+
     const baseTable = explore.tables[explore.baseTable].sqlTable;
-    const fieldQuoteChar = warehouseClient.getFieldQuoteChar();
+    const fieldQuoteChar = getFieldQuoteChar(warehouseClient.credentials.type);
     const stringQuoteChar = warehouseClient.getStringQuoteChar();
     const escapeStringQuoteChar = warehouseClient.getEscapeStringQuoteChar();
     const startOfWeek = warehouseClient.getStartOfWeek();
 
-    const dimensionSelects = dimensions.map((field) => {
-        const alias = field;
-        const dimension = getDimensionFromId(
-            field,
-            explore,
-            adapterType,
-            startOfWeek,
-        );
+    // dimensions contains a mix of Dimensions and CustomDimensions,
+    // we want to filter customDimensions from this list as we will handle them separately
+    const excludeCustomDimensions = (field: string) =>
+        !compiledCustomDimensions.map((cd) => cd.id).includes(field);
+    const dimensionSelects = dimensions
+        .filter(excludeCustomDimensions)
+        .map((field) => {
+            const alias = field;
+            const dimension = getDimensionFromId(
+                field,
+                explore,
+                adapterType,
+                startOfWeek,
+            );
 
-        assertValidDimensionRequiredAttribute(
-            dimension,
-            userAttributes,
-            `dimension: "${field}"`,
-        );
-        return `  ${dimension.compiledSql} AS ${fieldQuoteChar}${alias}${fieldQuoteChar}`;
-    });
+            assertValidDimensionRequiredAttribute(
+                dimension,
+                userAttributes,
+                `dimension: "${field}"`,
+            );
+            return `  ${dimension.compiledSql} AS ${fieldQuoteChar}${alias}${fieldQuoteChar}`;
+        });
 
-    const customDimensionSql = getCustomDimensionSql({
+    const selectedCustomDimensions = compiledCustomDimensions.filter((cd) =>
+        dimensions.includes(cd.id),
+    );
+    const customBinDimensionSql = getCustomBinDimensionSql({
         warehouseClient,
         explore,
-        compiledMetricQuery,
+        customDimensions:
+            selectedCustomDimensions?.filter(isCustomBinDimension),
         userAttributes,
         sorts,
+    });
+    const customSqlDimensionSql = getCustomSqlDimensionSql({
+        warehouseClient,
+        customDimensions: selectedCustomDimensions?.filter(
+            isCompiledCustomSqlDimension,
+        ),
     });
 
     const sqlFrom = `FROM ${baseTable} AS ${fieldQuoteChar}${explore.baseTable}${fieldQuoteChar}`;
@@ -576,26 +937,33 @@ export const buildQuery = ({
                 `custom metric: "${metric.name}"`,
             );
         });
+
     const selectedTables = new Set<string>([
         ...metrics.reduce<string[]>((acc, field) => {
             const metric = getMetricFromId(field, explore, compiledMetricQuery);
             return [...acc, ...(metric.tablesReferences || [metric.table])];
         }, []),
-        ...dimensions.reduce<string[]>((acc, field) => {
-            const dim = getDimensionFromId(
-                field,
-                explore,
-                adapterType,
-                startOfWeek,
-            );
-            return [...acc, ...(dim.tablesReferences || [dim.table])];
-        }, []),
-        ...(customDimensionSql?.tables || []),
+        ...dimensions
+            .filter(excludeCustomDimensions)
+            .reduce<string[]>((acc, field) => {
+                const dim = getDimensionFromId(
+                    field,
+                    explore,
+                    adapterType,
+                    startOfWeek,
+                );
+                return [...acc, ...(dim.tablesReferences || [dim.table])];
+            }, []),
+        ...(customBinDimensionSql?.tables || []),
+        ...(customSqlDimensionSql?.tables || []),
         ...getFilterRulesFromGroup(filters.dimensions).reduce<string[]>(
             (acc, filterRule) => {
-                const dim = getDimensionFromId(
+                const dim = getDimensionFromFilterTargetId(
                     filterRule.target.fieldId,
                     explore,
+                    compiledCustomDimensions.filter(
+                        isCompiledCustomSqlDimension,
+                    ),
                     adapterType,
                     startOfWeek,
                 );
@@ -616,38 +984,25 @@ export const buildQuery = ({
         ),
     ]);
 
-    const getJoinedTables = (tableNames: string[]): string[] => {
-        if (tableNames.length === 0) {
-            return [];
-        }
-        const allNewReferences = explore.joinedTables.reduce<string[]>(
-            (sum, joinedTable) => {
-                if (tableNames.includes(joinedTable.table)) {
-                    const newReferencesInJoin = parseAllReferences(
-                        joinedTable.sqlOn,
-                        joinedTable.table,
-                    ).reduce<string[]>(
-                        (acc, { refTable }) =>
-                            !tableNames.includes(refTable)
-                                ? [...acc, refTable]
-                                : acc,
-                        [],
-                    );
-                    return [...sum, ...newReferencesInJoin];
-                }
-                return sum;
-            },
-            [],
-        );
-        return [...allNewReferences, ...getJoinedTables(allNewReferences)];
-    };
+    const tableCompiledSqlWhere = explore.tables[explore.baseTable].sqlWhere;
+    const tableSqlWhere = explore.tables[explore.baseTable].uncompiledSqlWhere;
+
+    const tableSqlWhereTableReferences = tableSqlWhere
+        ? parseAllReferences(tableSqlWhere, explore.baseTable)
+        : undefined;
+
+    const tablesFromTableSqlWhereFilter = tableSqlWhereTableReferences
+        ? tableSqlWhereTableReferences.map((ref) => ref.refTable)
+        : [];
+
     const joinedTables = new Set([
         ...selectedTables,
-        ...getJoinedTables([...selectedTables]),
+        ...getJoinedTables(explore, [...selectedTables]),
+        ...tablesFromTableSqlWhereFilter,
     ]);
 
     const sqlJoins = explore.joinedTables
-        .filter((join) => joinedTables.has(join.table))
+        .filter((join) => joinedTables.has(join.table) || join.always)
         .map((join) => {
             const joinTable = explore.tables[join.table].sqlTable;
             const joinType = getJoinType(join.type);
@@ -655,6 +1010,7 @@ export const buildQuery = ({
             const alias = join.table;
             const parsedSqlOn = replaceUserAttributes(
                 join.compiledSqlOn,
+                intrinsicUserAttributes,
                 userAttributes,
                 stringQuoteChar,
                 'sql_on',
@@ -684,25 +1040,32 @@ export const buildQuery = ({
 
     const sqlSelect = `SELECT\n${[
         ...dimensionSelects,
-        ...(customDimensionSql?.selects || []),
+        ...(customBinDimensionSql?.selects || []),
+        ...(customSqlDimensionSql?.selects || []),
         ...metricSelects,
         ...filteredMetricSelects,
     ].join(',\n')}`;
 
     const groups = [
         ...(dimensionSelects.length > 0 ? dimensionSelects : []),
-        ...(customDimensionSql?.selects || []),
+        ...(customBinDimensionSql?.selects || []),
+        ...(customSqlDimensionSql?.selects || []),
     ];
     const sqlGroupBy =
         groups.length > 0
             ? `GROUP BY ${groups.map((val, i) => i + 1).join(',')}`
             : '';
+
+    const compiledDimensions = getDimensions(explore);
+
+    let shouldWrapQueryCTE = false;
     const fieldOrders = sorts.map((sort) => {
         if (
-            customDimensions &&
-            customDimensions.find(
+            compiledCustomDimensions &&
+            compiledCustomDimensions.find(
                 (customDimension) =>
-                    getCustomDimensionId(customDimension) === sort.fieldId,
+                    getItemId(customDimension) === sort.fieldId &&
+                    isCustomBinDimension(customDimension),
             )
         ) {
             // Custom dimensions will have a separate `select` for ordering,
@@ -712,17 +1075,48 @@ export const buildQuery = ({
                 sort.descending ? ' DESC' : ''
             }`;
         }
+        const sortedDimension = compiledDimensions.find(
+            (d) => getItemId(d) === sort.fieldId,
+        );
+
+        if (
+            sortedDimension &&
+            sortedDimension.timeInterval === TimeFrames.MONTH_NAME
+        ) {
+            shouldWrapQueryCTE = true;
+
+            return sortMonthName(
+                sortedDimension,
+                getFieldQuoteChar(warehouseClient.credentials.type),
+                sort.descending,
+            );
+        }
+        if (
+            sortedDimension &&
+            sortedDimension.timeInterval === TimeFrames.DAY_OF_WEEK_NAME
+        ) {
+            // in BigQuery, we cannot use a function in the ORDER BY clause that references a column that is not aggregated or grouped
+            // so we need to wrap the query in a CTE to allow us to reference the column in the ORDER BY clause
+            // for consistency, we do it for all warehouses
+            shouldWrapQueryCTE = true;
+            return sortDayOfWeekName(
+                sortedDimension,
+                startOfWeek,
+                getFieldQuoteChar(warehouseClient.credentials.type),
+                sort.descending,
+            );
+        }
         return `${fieldQuoteChar}${sort.fieldId}${fieldQuoteChar}${
             sort.descending ? ' DESC' : ''
         }`;
     });
+
     const sqlOrderBy =
         fieldOrders.length > 0 ? `ORDER BY ${fieldOrders.join(', ')}` : '';
-    const sqlFilterRule = (filter: FilterRule, fieldType: FieldType) => {
-        if (fieldType === FieldType.TABLE_CALCULATION) {
+    const sqlFilterRule = (filter: FilterRule, fieldType?: FieldType) => {
+        if (!fieldType) {
             const field = compiledMetricQuery.compiledTableCalculations?.find(
-                (tc) =>
-                    `table_calculation_${tc.name}` === filter.target.fieldId,
+                (tc) => getItemId(tc) === filter.target.fieldId,
             );
             return renderTableCalculationFilterRuleSql(
                 filter,
@@ -730,14 +1124,20 @@ export const buildQuery = ({
                 fieldQuoteChar,
                 stringQuoteChar,
                 escapeStringQuoteChar,
+                adapterType,
+                startOfWeek,
+                timezone,
             );
         }
 
         const field =
             fieldType === FieldType.DIMENSION
-                ? getDimensions(explore).find(
-                      (d) => fieldId(d) === filter.target.fieldId,
-                  )
+                ? [
+                      ...getDimensions(explore),
+                      ...compiledCustomDimensions.filter(
+                          isCompiledCustomSqlDimension,
+                      ),
+                  ].find((d) => getItemId(d) === filter.target.fieldId)
                 : getMetricFromId(
                       filter.target.fieldId,
                       explore,
@@ -748,6 +1148,7 @@ export const buildQuery = ({
                 `Filter has a reference to an unknown ${fieldType}: ${filter.target.fieldId}`,
             );
         }
+
         return renderFilterRuleSql(
             filter,
             field,
@@ -756,12 +1157,13 @@ export const buildQuery = ({
             escapeStringQuoteChar,
             startOfWeek,
             adapterType,
+            timezone,
         );
     };
 
     const getNestedFilterSQLFromGroup = (
         filterGroup: FilterGroup | undefined,
-        fieldType: FieldType,
+        fieldType?: FieldType,
     ): string | undefined => {
         if (filterGroup) {
             const operator = isAndFilterGroup(filterGroup) ? 'AND' : 'OR';
@@ -785,12 +1187,57 @@ export const buildQuery = ({
         return undefined;
     };
 
-    const baseTableSqlWhere = explore.tables[explore.baseTable].sqlWhere;
+    const getNestedDimensionFilterSQLFromModelFilters = (
+        table: CompiledTable,
+        dimensionsFilterGroup: FilterGroup | undefined,
+    ): string | undefined => {
+        const modelFilterRules: MetricFilterRule[] | undefined =
+            table.requiredFilters;
+        if (!modelFilterRules) return undefined;
 
-    const tableSqlWhere = baseTableSqlWhere
+        const reducedRules: string[] = modelFilterRules.reduce<string[]>(
+            (acc, filter) => {
+                const filterRule = createFilterRuleFromRequiredMetricRule(
+                    filter,
+                    table.name,
+                );
+                const dimension = Object.values(table.dimensions).find(
+                    (tc) => getItemId(tc) === filterRule.target.fieldId,
+                );
+
+                if (!dimension) return acc;
+                if (
+                    isFilterRuleInQuery(
+                        dimension,
+                        filterRule,
+                        dimensionsFilterGroup,
+                    )
+                )
+                    return acc;
+
+                const filterString = `( ${sqlFilterRule(
+                    filterRule,
+                    FieldType.DIMENSION,
+                )} )`;
+                return [...acc, filterString];
+            },
+            [],
+        );
+
+        return reducedRules.join(' AND ');
+    };
+
+    const requiredDimensionFilterSql =
+        getNestedDimensionFilterSQLFromModelFilters(
+            explore.tables[explore.baseTable],
+            filters.dimensions,
+        );
+
+    const tableSqlWhereWithReplacedAttributes = tableCompiledSqlWhere
         ? [
               replaceUserAttributes(
-                  baseTableSqlWhere,
+                  tableCompiledSqlWhere,
+                  intrinsicUserAttributes,
                   userAttributes,
                   stringQuoteChar,
               ),
@@ -801,8 +1248,16 @@ export const buildQuery = ({
         filters.dimensions,
         FieldType.DIMENSION,
     );
+    const requiredFiltersWhere = requiredDimensionFilterSql
+        ? [requiredDimensionFilterSql]
+        : [];
     const nestedFilterWhere = nestedFilterSql ? [nestedFilterSql] : [];
-    const allSqlFilters = [...tableSqlWhere, ...nestedFilterWhere];
+    const allSqlFilters = [
+        ...tableSqlWhereWithReplacedAttributes,
+        ...nestedFilterWhere,
+        ...requiredFiltersWhere,
+    ];
+
     const sqlWhere =
         allSqlFilters.length > 0 ? `WHERE ${allSqlFilters.join(' AND ')}` : '';
 
@@ -813,21 +1268,21 @@ export const buildQuery = ({
 
     const tableCalculationFilters = getNestedFilterSQLFromGroup(
         filters.tableCalculations,
-        FieldType.TABLE_CALCULATION,
     );
 
     const sqlLimit = `LIMIT ${limit}`;
 
     if (
         compiledMetricQuery.compiledTableCalculations.length > 0 ||
-        whereMetricFilters
+        whereMetricFilters ||
+        shouldWrapQueryCTE
     ) {
         const cteSql = [
             sqlSelect,
             sqlFrom,
             sqlJoins,
-            customDimensionSql && customDimensionSql.joins.length > 0
-                ? `CROSS JOIN ${customDimensionSql.joins.join(',\n')}`
+            customBinDimensionSql && customBinDimensionSql.joins.length > 0
+                ? `CROSS JOIN ${customBinDimensionSql.joins.join(',\n')}`
                 : undefined,
             sqlWhere,
             sqlGroupBy,
@@ -836,10 +1291,9 @@ export const buildQuery = ({
             .join('\n');
         const cteName = 'metrics';
         const ctes = [
-            ...(customDimensionSql?.ctes || []),
+            ...(customBinDimensionSql?.ctes || []),
             `${cteName} AS (\n${cteSql}\n)`,
         ];
-        const cte = `WITH ${ctes.join(',\n')}`;
         const tableCalculationSelects =
             compiledMetricQuery.compiledTableCalculations.map(
                 (tableCalculation) => {
@@ -855,9 +1309,18 @@ export const buildQuery = ({
             ? `WHERE ${whereMetricFilters}`
             : '';
         const secondQuery = [finalSelect, finalFrom, finalSqlWhere].join('\n');
-        const finalQuery = tableCalculationFilters
-            ? `SELECT * FROM (${secondQuery}) query_result WHERE ${tableCalculationFilters}`
-            : secondQuery;
+
+        let finalQuery = secondQuery;
+        if (tableCalculationFilters) {
+            const queryResultCteName = 'table_calculations';
+            ctes.push(`${queryResultCteName} AS (\n${secondQuery}\n)`);
+
+            finalQuery = `SELECT * FROM ${queryResultCteName}`;
+
+            if (tableCalculationFilters)
+                finalQuery += ` WHERE ${tableCalculationFilters}`;
+        }
+        const cte = `WITH ${ctes.join(',\n')}`;
 
         return {
             query: [cte, finalQuery, sqlOrderBy, sqlLimit].join('\n'),
@@ -867,14 +1330,14 @@ export const buildQuery = ({
     }
 
     const metricQuerySql = [
-        customDimensionSql && customDimensionSql.ctes.length > 0
-            ? `WITH ${customDimensionSql.ctes.join(',\n')}`
+        customBinDimensionSql && customBinDimensionSql.ctes.length > 0
+            ? `WITH ${customBinDimensionSql.ctes.join(',\n')}`
             : undefined,
         sqlSelect,
         sqlFrom,
         sqlJoins,
-        customDimensionSql && customDimensionSql.joins.length > 0
-            ? `CROSS JOIN ${customDimensionSql.joins.join(',\n')}`
+        customBinDimensionSql && customBinDimensionSql.joins.length > 0
+            ? `CROSS JOIN ${customBinDimensionSql.joins.join(',\n')}`
             : undefined,
         sqlWhere,
         sqlGroupBy,

@@ -1,34 +1,39 @@
 import {
-    Job,
     JobStatusType,
-    JobStep,
     JobStepStatusType,
+    type Job,
+    type JobStep,
 } from '@lightdash/common';
 import {
     Box,
     Drawer,
     Group,
     Loader,
-    MantineTheme,
     Stack,
     Text,
     Title,
     useMantineTheme,
+    type MantineTheme,
 } from '@mantine/core';
 import {
     IconAlertTriangle,
     IconAlertTriangleFilled,
     IconCircleCheckFilled,
 } from '@tabler/icons-react';
-import moment from 'moment';
-import { FC } from 'react';
+import dayjs from 'dayjs';
+import duration from 'dayjs/plugin/duration';
+import utc from 'dayjs/plugin/utc';
+import { type FC } from 'react';
 import {
     jobStatusLabel,
     jobStepStatusLabel,
     runningStepsInfo,
 } from '../../hooks/useRefreshServer';
-import { useActiveJob } from '../../providers/ActiveJobProvider';
+import useActiveJob from '../../providers/ActiveJob/useActiveJob';
 import MantineIcon from '../common/MantineIcon';
+
+dayjs.extend(duration);
+dayjs.extend(utc);
 
 const statusInfo = (status: string, theme: MantineTheme) => {
     switch (status) {
@@ -54,10 +59,10 @@ const durationSince = (
     startTime: Date,
     endTime: Date | undefined = undefined,
 ) => {
-    return moment
+    return dayjs
         .utc(
-            moment
-                .duration(moment(endTime).diff(moment(startTime)))
+            dayjs
+                .duration(dayjs(endTime).diff(dayjs(startTime)))
                 .asMilliseconds(),
         )
         .format('HH:mm:ss');

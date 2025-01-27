@@ -1,10 +1,12 @@
 import {
     assertUnreachable,
     ChartKind,
-    ResourceViewItem,
+    ChartSourceType,
     ResourceViewItemType,
+    type ResourceViewChartItem,
+    type ResourceViewItem,
 } from '@lightdash/common';
-import moment from 'moment';
+import dayjs from 'dayjs';
 
 export const getResourceTypeName = (item: ResourceViewItem) => {
     switch (item.type) {
@@ -13,7 +15,7 @@ export const getResourceTypeName = (item: ResourceViewItem) => {
         case ResourceViewItemType.SPACE:
             return 'Space';
         case ResourceViewItemType.CHART:
-            switch (item.data.chartType) {
+            switch (item.data.chartKind) {
                 case undefined:
                 case ChartKind.VERTICAL_BAR:
                     return 'Bar chart';
@@ -29,6 +31,8 @@ export const getResourceTypeName = (item: ResourceViewItem) => {
                     return 'Mixed chart';
                 case ChartKind.PIE:
                     return 'Pie chart';
+                case ChartKind.FUNNEL:
+                    return 'Funnel chart';
                 case ChartKind.TABLE:
                     return 'Table';
                 case ChartKind.BIG_NUMBER:
@@ -37,12 +41,32 @@ export const getResourceTypeName = (item: ResourceViewItem) => {
                     return 'Custom visualization';
                 default:
                     return assertUnreachable(
-                        item.data.chartType,
-                        `Chart type ${item.data.chartType} not supported`,
+                        item.data.chartKind,
+                        `Chart type ${item.data.chartKind} not supported`,
                     );
             }
         default:
             return assertUnreachable(item, 'Resource type not supported');
+    }
+};
+
+const getChartResourceUrl = (
+    projectUuid: string,
+    item: ResourceViewChartItem,
+) => {
+    switch (item.data.source) {
+        case ChartSourceType.SQL:
+            return `/projects/${projectUuid}/sql-runner/${item.data.slug}`;
+        case ChartSourceType.SEMANTIC_LAYER:
+            return `/projects/${projectUuid}/semantic-viewer/${item.data.slug}`;
+        case ChartSourceType.DBT_EXPLORE:
+        case undefined:
+            return `/projects/${projectUuid}/saved/${item.data.uuid}`;
+        default:
+            return assertUnreachable(
+                item.data.source,
+                `Unknown source type: ${item.data.source}`,
+            );
     }
 };
 
@@ -52,7 +76,7 @@ export const getResourceUrl = (projectUuid: string, item: ResourceViewItem) => {
         case ResourceViewItemType.DASHBOARD:
             return `/projects/${projectUuid}/dashboards/${item.data.uuid}/view`;
         case ResourceViewItemType.CHART:
-            return `/projects/${projectUuid}/saved/${item.data.uuid}`;
+            return getChartResourceUrl(projectUuid, item);
         case ResourceViewItemType.SPACE:
             return `/projects/${projectUuid}/spaces/${item.data.uuid}`;
         default:
@@ -84,7 +108,7 @@ export const getResourceViewsSinceWhenDescription = (
     }
 
     return item.data.firstViewedAt
-        ? `${item.data.views} views since ${moment(
+        ? `${item.data.views} views since ${dayjs(
               item.data.firstViewedAt,
           ).format('MMM D, YYYY h:mm A')}`
         : undefined;

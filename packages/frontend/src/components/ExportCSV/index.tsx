@@ -1,10 +1,13 @@
 import { subject } from '@casl/ability';
-import { ApiScheduledDownloadCsv, ResultRow } from '@lightdash/common';
+import {
+    type ApiScheduledDownloadCsv,
+    type ResultRow,
+} from '@lightdash/common';
 import { Alert, Box, Button, NumberInput, Radio, Stack } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconTableExport } from '@tabler/icons-react';
-import { FC, memo, useState } from 'react';
-import { useMutation } from 'react-query';
+import { useMutation } from '@tanstack/react-query';
+import { memo, useState, type FC, type ReactNode } from 'react';
 import { pollCsvFileUrl } from '../../api/csv';
 import useHealth from '../../hooks/health/useHealth';
 import useToaster from '../../hooks/toaster/useToaster';
@@ -36,7 +39,7 @@ export type ExportCSVProps = {
         onlyRaw: boolean,
     ) => Promise<ApiScheduledDownloadCsv>;
     isDialogBody?: boolean;
-    renderDialogActions?: (renderProps: ExportCsvRenderProps) => JSX.Element;
+    renderDialogActions?: (renderProps: ExportCsvRenderProps) => ReactNode;
 };
 
 const ExportCSV: FC<ExportCSVProps> = memo(

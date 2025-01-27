@@ -9,14 +9,14 @@ import {
 } from '@mantine/core';
 import { isNotEmpty, useForm } from '@mantine/form';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { FC, useEffect } from 'react';
+import { useEffect, type FC } from 'react';
 import Countdown, { zeroPad } from 'react-countdown';
 import {
     useEmailStatus,
     useOneTimePassword,
     useVerifyEmail,
 } from '../../hooks/useEmailVerification';
-import { useApp } from '../../providers/AppProvider';
+import useApp from '../../providers/App/useApp';
 import LoadingState from '../common/LoadingState';
 import MantineIcon from '../common/MantineIcon';
 
@@ -24,7 +24,9 @@ const VerifyEmailForm: FC<{ isLoading?: boolean }> = ({ isLoading }) => {
     const { health, user } = useApp();
     const { mutate: verifyCode, isLoading: verificationLoading } =
         useVerifyEmail();
-    const { data, isLoading: statusLoading } = useEmailStatus();
+    const { data, isInitialLoading: statusLoading } = useEmailStatus(
+        !!health.data?.isAuthenticated,
+    );
     const { mutate: sendVerificationEmail, isLoading: emailLoading } =
         useOneTimePassword();
     const form = useForm<{ code: string }>({
@@ -39,7 +41,7 @@ const VerifyEmailForm: FC<{ isLoading?: boolean }> = ({ isLoading }) => {
     const errorMessage = form.errors.code;
     const expirationTime = data?.otp?.expiresAt || new Date();
     const loadingState =
-        statusLoading || emailLoading || health.isLoading || isLoading;
+        statusLoading || emailLoading || health.isInitialLoading || isLoading;
 
     useEffect(() => {
         if (data?.otp && data?.otp.numberOfAttempts > 0) {

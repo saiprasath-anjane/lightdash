@@ -1,31 +1,37 @@
 import {
-    AdditionalMetric,
-    Dimension,
+    CustomFormatType,
     DimensionType,
-    Explore,
-    Field,
-    FilterRule,
     friendlyName,
     isAdditionalMetric,
+    isCustomBinDimension,
+    isCustomDimension,
     isDimension,
-    MetricFilterRule,
     MetricType,
     snakeCaseName,
+    type AdditionalMetric,
+    type CustomDimension,
+    type CustomFormat,
+    type Dimension,
+    type Explore,
+    type FilterRule,
+    type getFilterableDimensionsFromItemsMap,
+    type MetricFilterRule,
 } from '@lightdash/common';
-import { MetricFilterRuleWithFieldId } from '../FilterForm';
+import { type MetricFilterRuleWithFieldId } from '../FilterForm';
 
 export const addFieldRefToFilterRule = (
     filterRule: FilterRule,
-    fields: Record<string, Field>,
-): MetricFilterRuleWithFieldId => ({
-    ...filterRule,
-    target: {
-        ...filterRule.target,
-        fieldRef: `${fields[filterRule.target.fieldId].table}.${
-            fields[filterRule.target.fieldId].name
-        }`,
-    },
-});
+    fields: ReturnType<typeof getFilterableDimensionsFromItemsMap>,
+): MetricFilterRuleWithFieldId => {
+    const field = fields[filterRule.target.fieldId];
+    return {
+        ...filterRule,
+        target: {
+            ...filterRule.target,
+            fieldRef: `${field.table}.${field.name}`,
+        },
+    };
+};
 
 export const addFieldIdToMetricFilterRule = (
     filterRule: MetricFilterRule,
@@ -39,8 +45,23 @@ export const addFieldIdToMetricFilterRule = (
     },
 });
 
-export const getCustomMetricName = (label: string, dimensionName: string) =>
-    `${dimensionName}_${snakeCaseName(label)}`;
+export const getCustomMetricName = (
+    table: string,
+    label: string,
+    dimensionName: string,
+) => {
+    // Some warehouses don't support long names, so we need to truncate these custom metrics if the name is too long
+    if (table.length + dimensionName.length + label.length <= 62) {
+        return `${dimensionName}_${snakeCaseName(label)}`;
+    }
+
+    // 64 (max characters in postgres) - 3 (underscores) - 14 (timestamp length) = 47
+    const maxPartLength = Math.floor((47 - table.length) / 2);
+    // If the name is still too long, we truncate each part and add a timestamp to the end to make it unique
+    return `${dimensionName.slice(0, maxPartLength)}_${snakeCaseName(
+        label,
+    ).slice(0, maxPartLength)}_${new Date().getTime()}`;
+};
 
 const getCustomMetricDescription = (
     metricType: MetricType,
@@ -57,38 +78,28 @@ const getCustomMetricDescription = (
     }`;
 
 const getTypeOverridesForAdditionalMetric = (
-    item: Dimension | AdditionalMetric,
+    item: Dimension | AdditionalMetric | CustomDimension,
     type: MetricType,
 ): Partial<AdditionalMetric> | undefined => {
     if (!isDimension(item)) return;
 
     switch (type) {
         case MetricType.MIN:
-            switch (item.type) {
-                case DimensionType.DATE:
-                    return {
-                        type: MetricType.DATE,
-                        sql: `MIN(${item.sql})`,
-                    };
-                case DimensionType.TIMESTAMP:
-                    return {
-                        type: MetricType.TIMESTAMP,
-                        sql: `MIN(${item.sql})`,
-                    };
-                default:
-                    return;
-            }
         case MetricType.MAX:
             switch (item.type) {
                 case DimensionType.DATE:
                     return {
-                        type: MetricType.DATE,
-                        sql: `MAX(${item.sql})`,
+                        formatOptions: {
+                            type: CustomFormatType.DATE,
+                            timeInterval: item.timeInterval,
+                        },
                     };
                 case DimensionType.TIMESTAMP:
                     return {
-                        type: MetricType.TIMESTAMP,
-                        sql: `MAX(${item.sql})`,
+                        formatOptions: {
+                            type: CustomFormatType.TIMESTAMP,
+                            timeInterval: item.timeInterval,
+                        },
                     };
                 default:
                     return;
@@ -106,15 +117,19 @@ export const prepareCustomMetricData = ({
     isEditingCustomMetric,
     exploreData,
     percentile: metricPercentile,
+    formatOptions,
 }: {
-    item: Dimension | AdditionalMetric;
+    item: Dimension | AdditionalMetric | CustomDimension;
     type: MetricType;
     customMetricLabel: string;
     customMetricFiltersWithIds: MetricFilterRuleWithFieldId[];
     isEditingCustomMetric: boolean;
     exploreData?: Explore;
     percentile?: number;
+    formatOptions?: CustomFormat;
 }): AdditionalMetric => {
+    if (isCustomBinDimension(item))
+        throw new Error('Cannot create custom metric from bin dimension');
     const shouldCopyFormatting = [
         MetricType.PERCENTILE,
         MetricType.MEDIAN,
@@ -125,13 +140,17 @@ export const prepareCustomMetricData = ({
     ].includes(type);
 
     const compact =
-        shouldCopyFormatting && item.compact ? { compact: item.compact } : {};
+        !isCustomDimension(item) && shouldCopyFormatting && item.compact
+            ? { compact: item.compact }
+            : {};
     const format =
-        shouldCopyFormatting && item.format ? { format: item.format } : {};
+        !isCustomDimension(item) && shouldCopyFormatting && item.format
+            ? { format: item.format }
+            : {};
 
     const defaultRound = type === MetricType.AVERAGE ? { round: 2 } : {};
     const round =
-        shouldCopyFormatting && item.round
+        !isCustomDimension(item) && shouldCopyFormatting && item.round
             ? { round: item.round }
             : defaultRound;
 
@@ -150,7 +169,7 @@ export const prepareCustomMetricData = ({
         );
 
     const tableLabel = exploreData?.tables[item.table].label;
-
+    const label = isCustomDimension(item) ? item.name : item.label;
     return {
         table: item.table,
         sql: item.sql,
@@ -158,10 +177,12 @@ export const prepareCustomMetricData = ({
         ...format,
         ...round,
         ...compact,
+        formatOptions,
         percentile,
         filters: customMetricFilters.length > 0 ? customMetricFilters : [],
         label: customMetricLabel,
         name: getCustomMetricName(
+            item.table,
             customMetricLabel,
             isEditingCustomMetric &&
                 isAdditionalMetric(item) &&
@@ -171,11 +192,11 @@ export const prepareCustomMetricData = ({
                 : item.name,
         ),
         ...(isEditingCustomMetric &&
-            item.label &&
+            label &&
             tableLabel && {
                 description: getCustomMetricDescription(
                     type,
-                    item.label,
+                    label,
                     tableLabel,
                     customMetricFilters,
                 ),

@@ -2,14 +2,14 @@ import {
     Button,
     Group,
     Modal,
-    ModalProps,
     Stack,
     Text,
     TextInput,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { FC, useState } from 'react';
+import { useState, type FC } from 'react';
 import { useOrganization } from '../../../hooks/organization/useOrganization';
 import { useDeleteOrganizationMutation } from '../../../hooks/organization/useOrganizationDeleteMultation';
 import MantineIcon from '../../common/MantineIcon';
@@ -17,13 +17,13 @@ import MantineIcon from '../../common/MantineIcon';
 export const OrganizationDeleteModal: FC<
     Pick<ModalProps, 'opened' | 'onClose'>
 > = ({ opened, onClose }) => {
-    const { isLoading, data: organization } = useOrganization();
+    const { isInitialLoading, data: organization } = useOrganization();
     const { mutateAsync, isLoading: isDeleting } =
         useDeleteOrganizationMutation();
 
     const [confirmOrgName, setConfirmOrgName] = useState<string>();
 
-    if (isLoading || !organization) return null;
+    if (isInitialLoading || !organization) return null;
 
     const handleConfirm = async () => {
         await mutateAsync(organization.organizationUuid);

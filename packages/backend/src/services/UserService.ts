@@ -1,11 +1,15 @@
 import { subject } from '@casl/ability';
 import {
     ActivateUser,
+    AnyType,
+    ArgumentsOf,
+    assertUnreachable,
     AuthorizationError,
     CompleteUserArgs,
     CreateInviteLink,
     CreatePasswordResetLink,
     CreateUserArgs,
+    DeactivatedAccountError,
     DeleteOpenIdentity,
     EmailStatusExpiring,
     ExpiredError,
@@ -13,12 +17,17 @@ import {
     getEmailDomain,
     hasInviteCode,
     InviteLink,
+    isOpenIdIdentityIssuerType,
     isOpenIdUser,
     isUserWithOrg,
     LightdashMode,
     LightdashUser,
+    LocalIssuerTypes,
+    LoginOptions,
+    LoginOptionTypes,
     NotExistsError,
     NotFoundError,
+    OpenIdIdentityIssuerType,
     OpenIdIdentitySummary,
     OpenIdUser,
     OrganizationMemberRole,
@@ -27,18 +36,21 @@ import {
     RegisterOrActivateUser,
     SessionUser,
     UpdateUserArgs,
+    UpsertUserWarehouseCredentials,
     UserAllowedOrganization,
     validateOrganizationEmailDomains,
 } from '@lightdash/common';
 import { randomInt } from 'crypto';
+import { uniq } from 'lodash';
 import { nanoid } from 'nanoid';
 import refresh from 'passport-oauth2-refresh';
-import { analytics, identifyUser } from '../analytics/client';
+import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
 import EmailClient from '../clients/EmailClient/EmailClient';
-import { lightdashConfig } from '../config/lightdashConfig';
+import { LightdashConfig } from '../config/parseConfig';
 import Logger from '../logging/logger';
 import { PersonalAccessTokenModel } from '../models/DashboardModel/PersonalAccessTokenModel';
 import { EmailModel } from '../models/EmailModel';
+import { GroupsModel } from '../models/GroupsModel';
 import { InviteLinkModel } from '../models/InviteLinkModel';
 import { OpenIdIdentityModel } from '../models/OpenIdIdentitiesModel';
 import { OrganizationAllowedEmailDomainsModel } from '../models/OrganizationAllowedEmailDomainsModel';
@@ -47,10 +59,18 @@ import { OrganizationModel } from '../models/OrganizationModel';
 import { PasswordResetLinkModel } from '../models/PasswordResetLinkModel';
 import { SessionModel } from '../models/SessionModel';
 import { UserModel } from '../models/UserModel';
+import { UserWarehouseCredentialsModel } from '../models/UserWarehouseCredentials/UserWarehouseCredentialsModel';
+import { WarehouseAvailableTablesModel } from '../models/WarehouseAvailableTablesModel/WarehouseAvailableTablesModel';
+import { postHogClient } from '../postHog';
+import { wrapSentryTransaction } from '../utils';
+import { BaseService } from './BaseService';
 
-type UserServiceDependencies = {
+type UserServiceArguments = {
+    lightdashConfig: LightdashConfig;
+    analytics: LightdashAnalytics;
     inviteLinkModel: InviteLinkModel;
     userModel: UserModel;
+    groupsModel: GroupsModel;
     sessionModel: SessionModel;
     emailModel: EmailModel;
     openIdIdentityModel: OpenIdIdentityModel;
@@ -60,12 +80,20 @@ type UserServiceDependencies = {
     organizationModel: OrganizationModel;
     personalAccessTokenModel: PersonalAccessTokenModel;
     organizationAllowedEmailDomainsModel: OrganizationAllowedEmailDomainsModel;
+    userWarehouseCredentialsModel: UserWarehouseCredentialsModel;
+    warehouseAvailableTablesModel: WarehouseAvailableTablesModel;
 };
 
-export class UserService {
+export class UserService extends BaseService {
+    private readonly lightdashConfig: LightdashConfig;
+
+    private readonly analytics: LightdashAnalytics;
+
     private readonly inviteLinkModel: InviteLinkModel;
 
     private readonly userModel: UserModel;
+
+    private readonly groupsModel: GroupsModel;
 
     private readonly sessionModel: SessionModel;
 
@@ -85,13 +113,20 @@ export class UserService {
 
     private readonly organizationAllowedEmailDomainsModel: OrganizationAllowedEmailDomainsModel;
 
+    private readonly userWarehouseCredentialsModel: UserWarehouseCredentialsModel;
+
+    private readonly warehouseAvailableTablesModel: WarehouseAvailableTablesModel;
+
     private readonly emailOneTimePasscodeExpirySeconds = 60 * 15;
 
     private readonly emailOneTimePasscodeMaxAttempts = 5;
 
     constructor({
+        lightdashConfig,
+        analytics,
         inviteLinkModel,
         userModel,
+        groupsModel,
         sessionModel,
         emailModel,
         openIdIdentityModel,
@@ -101,9 +136,15 @@ export class UserService {
         organizationMemberProfileModel,
         personalAccessTokenModel,
         organizationAllowedEmailDomainsModel,
-    }: UserServiceDependencies) {
+        userWarehouseCredentialsModel,
+        warehouseAvailableTablesModel,
+    }: UserServiceArguments) {
+        super();
+        this.lightdashConfig = lightdashConfig;
+        this.analytics = analytics;
         this.inviteLinkModel = inviteLinkModel;
         this.userModel = userModel;
+        this.groupsModel = groupsModel;
         this.sessionModel = sessionModel;
         this.emailModel = emailModel;
         this.openIdIdentityModel = openIdIdentityModel;
@@ -114,6 +155,62 @@ export class UserService {
         this.personalAccessTokenModel = personalAccessTokenModel;
         this.organizationAllowedEmailDomainsModel =
             organizationAllowedEmailDomainsModel;
+        this.userWarehouseCredentialsModel = userWarehouseCredentialsModel;
+        this.warehouseAvailableTablesModel = warehouseAvailableTablesModel;
+    }
+
+    private identifyUser(
+        user: LightdashUser & { isMarketingOptedIn?: boolean },
+    ): void {
+        if (this.lightdashConfig.mode === LightdashMode.DEMO) {
+            return;
+        }
+        this.analytics.identify({
+            userId: user.userUuid,
+            traits: user.isTrackingAnonymized
+                ? { is_tracking_anonymized: user.isTrackingAnonymized }
+                : {
+                      email: user.email,
+                      first_name: user.firstName,
+                      last_name: user.lastName,
+                      is_tracking_anonymized: user.isTrackingAnonymized,
+                      is_marketing_opted_in: user.isMarketingOptedIn,
+                  },
+        });
+
+        postHogClient?.identify({
+            distinctId: user.userUuid,
+            properties: {
+                uuid: user.userUuid,
+                ...(user.isTrackingAnonymized
+                    ? {}
+                    : {
+                          email: user.email,
+                          first_name: user.firstName,
+                          last_name: user.lastName,
+                      }),
+            },
+        });
+
+        if (user.organizationUuid) {
+            this.analytics.group({
+                userId: user.userUuid,
+                groupId: user.organizationUuid,
+                traits: {
+                    name: user.organizationName,
+                },
+            });
+
+            postHogClient?.groupIdentify({
+                groupType: 'organization',
+                groupKey: user.organizationUuid,
+                properties: {
+                    uuid: user.organizationUuid,
+                    name: user.organizationName,
+                },
+                distinctId: user.userUuid,
+            });
+        }
     }
 
     private async tryVerifyUserEmail(
@@ -125,7 +222,7 @@ export class UserService {
             email,
         );
         if (updatedEmails.length > 0) {
-            analytics.track({
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'user.verified',
                 properties: {
@@ -141,19 +238,35 @@ export class UserService {
         inviteCode: string,
         activateUser: ActivateUser | OpenIdUser,
     ): Promise<LightdashUser> {
-        if (
-            !isOpenIdUser(activateUser) &&
-            lightdashConfig.auth.disablePasswordAuthentication
-        ) {
-            throw new ForbiddenError('Password credentials are not allowed');
-        }
         const inviteLink = await this.inviteLinkModel.getByCode(inviteCode);
         const userEmail = isOpenIdUser(activateUser)
             ? activateUser.openId.email
             : inviteLink.email;
 
+        if (isOpenIdUser(activateUser)) {
+            if (
+                (await this.isLoginMethodAllowed(
+                    userEmail,
+                    activateUser.openId.issuerType,
+                )) === false
+            ) {
+                throw new ForbiddenError(
+                    `User with email ${userEmail} is not allowed to login with ${activateUser.openId.issuerType}`,
+                );
+            }
+        } else if (
+            (await this.isLoginMethodAllowed(
+                userEmail,
+                LocalIssuerTypes.EMAIL,
+            )) === false
+        ) {
+            throw new ForbiddenError(
+                `User with email ${userEmail} is not allowed to login with password`,
+            );
+        }
+
         if (inviteLink.email.toLowerCase() !== userEmail.toLowerCase()) {
-            Logger.error(
+            this.logger.error(
                 `User accepted invite with wrong email ${userEmail} when the invited email was ${inviteLink.email}`,
             );
             throw new AuthorizationError(
@@ -165,11 +278,14 @@ export class UserService {
             activateUser,
         );
         await this.inviteLinkModel.deleteByCode(inviteLink.inviteCode);
-        identifyUser(user);
-        analytics.track({
+        this.identifyUser(user);
+        this.analytics.track({
             event: 'user.created',
             userId: user.userUuid,
             properties: {
+                context: 'accept_invite',
+                createdUserId: user.userUuid,
+                organizationId: user.organizationUuid,
                 userConnectionType: 'password',
             },
         });
@@ -180,15 +296,29 @@ export class UserService {
     }
 
     async delete(user: SessionUser, userUuidToDelete: string): Promise<void> {
-        if (user.organizationUuid) {
-            if (user.ability.cannot('delete', 'OrganizationMemberProfile')) {
+        const userToDelete = await this.userModel.getUserDetailsByUuid(
+            userUuidToDelete,
+        );
+        // The user might not have an org yet
+        // This is expected on the "Cancel registration" flow on single org instances.
+        if (userToDelete?.organizationUuid) {
+            // We assume only one org per user
+
+            if (
+                user.ability.cannot(
+                    'delete',
+                    subject('OrganizationMemberProfile', {
+                        organizationUuid: userToDelete.organizationUuid,
+                    }),
+                )
+            ) {
                 throw new ForbiddenError();
             }
 
             // Race condition between check and delete
             const [admin, ...remainingAdmins] =
                 await this.organizationMemberProfileModel.getOrganizationAdmins(
-                    user.organizationUuid,
+                    userToDelete.organizationUuid,
                 );
             if (
                 remainingAdmins.length === 0 &&
@@ -203,11 +333,19 @@ export class UserService {
         await this.sessionModel.deleteAllByUserUuid(userUuidToDelete);
 
         await this.userModel.delete(userUuidToDelete);
-        analytics.track({
+        this.analytics.track({
             event: 'user.deleted',
             userId: user.userUuid,
             properties: {
-                deletedUserUuid: userUuidToDelete,
+                context:
+                    user.userUuid !== userUuidToDelete
+                        ? 'delete_org_member'
+                        : 'delete_self',
+                firstName: userToDelete.firstName,
+                lastName: userToDelete.lastName,
+                email: userToDelete.email,
+                organizationId: userToDelete.organizationUuid,
+                deletedUserId: userUuidToDelete,
             },
         });
     }
@@ -216,10 +354,17 @@ export class UserService {
         user: SessionUser,
         createInviteLink: CreateInviteLink,
     ): Promise<InviteLink> {
-        if (user.ability.cannot('create', 'InviteLink')) {
+        // We assume users can only have one org
+        const { organizationUuid } = user;
+
+        if (
+            user.ability.cannot(
+                'create',
+                subject('InviteLink', { organizationUuid }),
+            )
+        ) {
             throw new ForbiddenError();
         }
-        const { organizationUuid } = user;
         const { expiresAt, email, role } = createInviteLink;
         const inviteCode = nanoid(30);
         if (organizationUuid === undefined) {
@@ -229,22 +374,23 @@ export class UserService {
         const existingUserWithEmail = await this.userModel.findUserByEmail(
             email,
         );
-        if (
-            existingUserWithEmail &&
-            existingUserWithEmail.organizationUuid !== organizationUuid
-        ) {
-            throw new ParameterError(
-                'Email is already used by a user in another organization',
-            );
-        }
-        if (existingUserWithEmail && existingUserWithEmail.isActive) {
-            throw new ParameterError(
-                'Email is already used by a user in your organization',
-            );
+        if (existingUserWithEmail && existingUserWithEmail.organizationUuid) {
+            if (existingUserWithEmail.organizationUuid !== organizationUuid) {
+                throw new ParameterError(
+                    'Email is already used by a user in another organization',
+                );
+            } else if (!existingUserWithEmail.isPending) {
+                throw new ParameterError(
+                    'Email is already used by a user in your organization',
+                );
+            }
         }
 
         let userUuid: string;
-        const userRole = user.ability.can('manage', 'OrganizationMemberProfile')
+        const userRole = user.ability.can(
+            'manage',
+            subject('OrganizationMemberProfile', { organizationUuid }),
+        )
             ? role || OrganizationMemberRole.MEMBER
             : OrganizationMemberRole.MEMBER;
         if (!existingUserWithEmail) {
@@ -262,6 +408,18 @@ export class UserService {
             userUuid = existingUserWithEmail.userUuid;
         }
 
+        if (existingUserWithEmail && !existingUserWithEmail?.organizationUuid) {
+            Logger.warn(
+                `User with email ${email} already exists but has no org, so we invite them to join`,
+            );
+            await this.userModel.joinOrg(
+                existingUserWithEmail.userUuid,
+                organizationUuid,
+                userRole,
+                undefined,
+            );
+        }
+
         const inviteLink = await this.inviteLinkModel.upsert(
             inviteCode,
             expiresAt,
@@ -269,13 +427,13 @@ export class UserService {
             userUuid,
         );
         await this.emailClient.sendInviteEmail(user, inviteLink);
-        analytics.track({
+        this.analytics.track({
             userId: user.userUuid,
             event: 'invite_link.created',
         });
 
         const organization = await this.organizationModel.get(organizationUuid);
-        analytics.track({
+        this.analytics.track({
             userId: user.userUuid,
             event: 'permission.updated',
             properties: {
@@ -295,77 +453,398 @@ export class UserService {
     }
 
     async revokeAllInviteLinks(user: SessionUser) {
+        // We assume users can only have one org
         const { organizationUuid } = user;
-        if (user.ability.cannot('delete', 'InviteLink')) {
+
+        if (
+            user.ability.cannot(
+                'delete',
+                subject('InviteLink', { organizationUuid }),
+            )
+        ) {
             throw new ForbiddenError();
         }
         if (organizationUuid === undefined) {
             throw new NotExistsError('Organization not found');
         }
         await this.inviteLinkModel.deleteByOrganization(organizationUuid);
-        analytics.track({
+        this.analytics.track({
             userId: user.userUuid,
             event: 'invite_link.all_revoked',
         });
     }
 
+    /**
+     * @deprecated Group Sync is deprecated. https://github.com/lightdash/lightdash/issues/12430
+     */
+    private async tryAddUserToGroups(
+        ...data: ArgumentsOf<GroupsModel['addUserToGroupsIfExist']>
+    ) {
+        const updatedGroups = await this.groupsModel.addUserToGroupsIfExist(
+            ...data,
+        );
+        if (updatedGroups) {
+            await Promise.all(
+                updatedGroups.map(async (groupUuid) => {
+                    const updatedGroup =
+                        await this.groupsModel.getGroupWithMembers(groupUuid);
+                    this.analytics.track({
+                        event: 'group.updated',
+                        userId: data[0].userUuid,
+                        properties: {
+                            viaSso: true,
+                            organizationId: updatedGroup.organizationUuid,
+                            groupId: updatedGroup.uuid,
+                            name: updatedGroup.name,
+                            countUsersInGroup: updatedGroup.memberUuids.length,
+                            context: 'add_member_via_sso',
+                        },
+                    });
+                }),
+            );
+        }
+    }
+
+    /**
+     * In this method we check if the user is allowed to register in this instance before registerUser happens.
+     * If the instance is a single org, and there are already users and orgs,
+     * and the user's email domain is allowed in the org whitelisted,
+     * we throw a ForbiddenError.
+     * @param inviteCode invite code
+     * @param email email for the user registering
+     */
+    async checkNewUserRegistrationAllowed(
+        inviteCode: string | undefined,
+        email: string,
+    ) {
+        if (
+            inviteCode === undefined &&
+            !this.lightdashConfig.allowMultiOrgs &&
+            (await this.userModel.hasUsers()) &&
+            (await this.organizationModel.hasOrgs()) &&
+            (
+                await this.organizationModel.getAllowedOrgsForDomain(
+                    getEmailDomain(email),
+                )
+            ).length < 1
+        ) {
+            throw new ForbiddenError(
+                `You can't register a new user with email ${email} on this instance. Please contact your organization administrator and ask for an invite`,
+            );
+        }
+    }
+
     async loginWithOpenId(
         openIdUser: OpenIdUser,
-        sessionUser: SessionUser | undefined,
+        authenticatedUser: SessionUser | undefined,
         inviteCode: string | undefined,
         refreshToken?: string,
     ): Promise<SessionUser> {
-        const loginUser = await this.userModel.findSessionUserByOpenId(
+        this.logger.info(
+            `Starting loginWithOpenId - Email: ${
+                openIdUser.openId.email
+            }, Issuer: ${
+                openIdUser.openId.issuerType
+            }, Has invite code: ${!!inviteCode}, Is authenticated: ${!!authenticatedUser}`,
+        );
+
+        const openIdSession = await this.userModel.findSessionUserByOpenId(
             openIdUser.openId.issuer,
             openIdUser.openId.subject,
         );
+        this.logger.info(
+            `Existing OpenID session found: ${!!openIdSession}, Is active: ${
+                openIdSession?.isActive
+            }`,
+        );
 
+        if (
+            (await this.isLoginMethodAllowed(
+                openIdUser.openId.email,
+                openIdUser.openId.issuerType,
+            )) === false
+        ) {
+            this.logger.info(
+                `Login method ${openIdUser.openId.issuerType} not allowed for email ${openIdUser.openId.email}`,
+            );
+            throw new ForbiddenError(
+                `User with email ${openIdUser.openId.email} is not allowed to login with ${openIdUser.openId.issuerType}`,
+            );
+        }
+        this.logger.info(
+            `Logging with OpenId email ${openIdUser.openId.email} and groups ${
+                openIdUser.openId.groups
+            }, is authenticated: ${authenticatedUser !== undefined}`,
+        );
         // Identity already exists. Update the identity attributes and login the user
-        if (loginUser) {
+        if (openIdSession) {
+            if (!openIdSession.isActive) {
+                this.logger.info(
+                    `User ${openIdSession.userUuid} account is deactivated`,
+                );
+                throw new DeactivatedAccountError();
+            }
+
+            const organization = this.loginToOrganization(
+                openIdSession?.userUuid,
+                openIdUser.openId.issuerType,
+            );
+            const loginUser: SessionUser = {
+                ...openIdSession,
+                ...organization,
+            };
+
+            if (inviteCode) {
+                const inviteLink = await this.inviteLinkModel.getByCode(
+                    inviteCode,
+                );
+                this.logger.info(
+                    `Checking invite code - Invite email: ${inviteLink.email}, User email: ${loginUser.email}`,
+                );
+                if (
+                    loginUser.email &&
+                    inviteLink.email.toLowerCase() !==
+                        loginUser.email.toLowerCase()
+                ) {
+                    this.logger.error(
+                        `User accepted invite with wrong email ${loginUser.email} when the invited email was ${inviteLink.email}`,
+                    );
+                    throw new AuthorizationError(
+                        `Provided email ${loginUser.email} does not match the invited email.`,
+                    );
+                }
+            }
+
             await this.openIdIdentityModel.updateIdentityByOpenId({
                 ...openIdUser.openId,
                 refreshToken,
             });
             await this.tryVerifyUserEmail(loginUser, openIdUser.openId.email);
-            identifyUser(loginUser);
-            analytics.track({
+            this.identifyUser(loginUser);
+            this.analytics.track({
                 userId: loginUser.userUuid,
                 event: 'user.logged_in',
                 properties: {
-                    loginProvider: 'google',
+                    loginProvider: openIdUser.openId.issuerType,
                 },
             });
+
+            if (
+                this.lightdashConfig.groups.enabled === true &&
+                this.lightdashConfig.auth.enableGroupSync === true &&
+                Array.isArray(openIdUser.openId.groups) &&
+                openIdUser.openId.groups.length &&
+                loginUser.organizationUuid
+            ) {
+                this.logger.info(
+                    `Syncing groups for user ${
+                        loginUser.userUuid
+                    } - Groups: ${openIdUser.openId.groups.join(', ')}`,
+                );
+                await this.tryAddUserToGroups({
+                    userUuid: loginUser.userUuid,
+                    groups: openIdUser.openId.groups,
+                    organizationUuid: loginUser.organizationUuid,
+                });
+            }
+
             return loginUser;
         }
 
-        // User already logged in? Link openid identity to logged-in user
-        if (sessionUser?.userId) {
-            await this.openIdIdentityModel.createIdentity({
-                userId: sessionUser.userId,
-                issuer: openIdUser.openId.issuer,
-                subject: openIdUser.openId.subject,
-                email: openIdUser.openId.email,
-                issuerType: openIdUser.openId.issuerType,
+        // Link the new openid identity to an existing user if they already have another OIDC with the same email
+        if (!authenticatedUser && this.lightdashConfig.auth.enableOidcLinking) {
+            const identities =
+                await this.openIdIdentityModel.findIdentitiesByEmail(
+                    openIdUser.openId.email,
+                );
+            this.logger.info(
+                `OIDC linking enabled - Found ${identities.length} existing identities for email ${openIdUser.openId.email}`,
+            );
+            const identitiesUsers = uniq(
+                identities.map((identity) => identity.userUuid),
+            );
+            if (identitiesUsers.length > 1) {
+                this.logger.warn(
+                    `Multiple openid identities found with the same email ${openIdUser.openId.email}`,
+                );
+            } else if (identitiesUsers.length === 1) {
+                const sessionUser = await this.userModel.findSessionUserByUUID(
+                    identitiesUsers[0],
+                );
+                this.logger.info(
+                    `Linking new OpenID identity to existing user ${sessionUser.userUuid}`,
+                );
+
+                if (
+                    this.lightdashConfig.groups.enabled === true &&
+                    this.lightdashConfig.auth.enableGroupSync === true &&
+                    Array.isArray(openIdUser.openId.groups) &&
+                    openIdUser.openId.groups.length &&
+                    sessionUser.organizationUuid
+                ) {
+                    this.logger.info(
+                        `Syncing groups for existing user ${
+                            sessionUser.userUuid
+                        } - Groups: ${openIdUser.openId.groups.join(', ')}`,
+                    );
+                    await this.tryAddUserToGroups({
+                        userUuid: sessionUser.userUuid,
+                        groups: openIdUser.openId.groups,
+                        organizationUuid: sessionUser.organizationUuid,
+                    });
+                }
+
+                return this.linkOpenIdIdentityToUser(
+                    sessionUser,
+                    openIdUser,
+                    refreshToken,
+                );
+            }
+        }
+
+        // Link the new openid identity to an existing user if they already have the same primary email and it's verified
+        if (
+            !authenticatedUser &&
+            this.lightdashConfig.auth.enableOidcToEmailLinking
+        ) {
+            const userWithSameEmail =
+                await this.userModel.findSessionUserByPrimaryEmail(
+                    openIdUser.openId.email,
+                );
+            this.logger.info(
+                `Email linking enabled - Found user with same email: ${!!userWithSameEmail}`,
+            );
+
+            if (userWithSameEmail) {
+                const emailStatus = await this.emailModel.getPrimaryEmailStatus(
+                    userWithSameEmail.userUuid,
+                );
+                this.logger.info(
+                    `Email status for user ${userWithSameEmail.userUuid} - Is verified: ${emailStatus.isVerified}`,
+                );
+
+                if (emailStatus.isVerified) {
+                    if (
+                        this.lightdashConfig.groups.enabled === true &&
+                        this.lightdashConfig.auth.enableGroupSync === true &&
+                        Array.isArray(openIdUser.openId.groups) &&
+                        openIdUser.openId.groups.length &&
+                        userWithSameEmail.organizationUuid
+                    ) {
+                        this.logger.info(
+                            `Syncing groups for email-linked user ${
+                                userWithSameEmail.userUuid
+                            } - Groups: ${openIdUser.openId.groups.join(', ')}`,
+                        );
+                        await this.tryAddUserToGroups({
+                            userUuid: userWithSameEmail.userUuid,
+                            groups: openIdUser.openId.groups,
+                            organizationUuid:
+                                userWithSameEmail.organizationUuid,
+                        });
+                    }
+
+                    return this.linkOpenIdIdentityToUser(
+                        userWithSameEmail,
+                        openIdUser,
+                        refreshToken,
+                    );
+                }
+            }
+        }
+
+        // Link openid identity to currently logged in user
+        if (authenticatedUser) {
+            this.logger.info(
+                `Linking OpenID identity to authenticated user ${authenticatedUser.userUuid}`,
+            );
+            if (
+                this.lightdashConfig.groups.enabled === true &&
+                this.lightdashConfig.auth.enableGroupSync === true &&
+                Array.isArray(openIdUser.openId.groups) &&
+                openIdUser.openId.groups.length &&
+                authenticatedUser.organizationUuid
+            ) {
+                this.logger.info(
+                    `Syncing groups for authenticated user ${
+                        authenticatedUser.userUuid
+                    } - Groups: ${openIdUser.openId.groups.join(', ')}`,
+                );
+                await this.tryAddUserToGroups({
+                    userUuid: authenticatedUser.userUuid,
+                    groups: openIdUser.openId.groups,
+                    organizationUuid: authenticatedUser.organizationUuid,
+                });
+            }
+
+            return this.linkOpenIdIdentityToUser(
+                authenticatedUser,
+                openIdUser,
                 refreshToken,
-            });
-            await this.tryVerifyUserEmail(sessionUser, openIdUser.openId.email);
-            analytics.track({
-                userId: sessionUser.userUuid,
-                event: 'user.identity_linked',
-                properties: {
-                    loginProvider: 'google',
-                },
-            });
-            return sessionUser;
+            );
         }
 
         // Create user
+        this.logger.info(
+            `Creating new user with OpenID - Email: ${openIdUser.openId.email}`,
+        );
+        await this.checkNewUserRegistrationAllowed(
+            inviteCode,
+            openIdUser.openId.email,
+        );
         const createdUser = await this.activateUserWithOpenId(
             openIdUser,
             inviteCode,
         );
         await this.tryVerifyUserEmail(createdUser, openIdUser.openId.email);
-        return createdUser;
+        const allowedOrgs =
+            await this.organizationModel.getAllowedOrgsForDomain(
+                getEmailDomain(openIdUser.openId.email),
+            );
+        this.logger.info(
+            `Found ${
+                allowedOrgs.length
+            } allowed organizations for domain ${getEmailDomain(
+                openIdUser.openId.email,
+            )}`,
+        );
+
+        const hasGroups =
+            this.lightdashConfig.groups.enabled === true &&
+            this.lightdashConfig.auth.enableGroupSync === true &&
+            Array.isArray(openIdUser.openId.groups) &&
+            openIdUser.openId.groups.length;
+        let { organizationUuid } = createdUser;
+        if (
+            !organizationUuid &&
+            !inviteCode &&
+            hasGroups &&
+            allowedOrgs.length === 1
+        ) {
+            organizationUuid = allowedOrgs[0].organizationUuid;
+            this.logger.info(
+                `Automatically joining user '${createdUser.email}' to whitelisted organization ${organizationUuid}`,
+            );
+            await this.joinOrg(createdUser, organizationUuid); // Join automatically the whitelisted org so we can apply groups
+        }
+
+        if (hasGroups && organizationUuid) {
+            this.logger.info(
+                `Syncing groups for new user ${
+                    createdUser.userUuid
+                } - Groups: ${openIdUser.openId.groups!.join(', ')}`,
+            );
+            await this.tryAddUserToGroups({
+                userUuid: createdUser.userUuid,
+                groups: openIdUser.openId.groups!,
+                organizationUuid,
+            });
+        }
+
+        return {
+            ...createdUser,
+            organizationUuid,
+        };
     }
 
     private async activateUserWithOpenId(
@@ -381,6 +860,45 @@ export class UserService {
         }
         const user = await this.registerUser(openIdUser);
         return this.userModel.findSessionUserByUUID(user.userUuid);
+    }
+
+    private async linkOpenIdIdentityToUser(
+        sessionUser: SessionUser,
+        openIdUser: OpenIdUser,
+        refreshToken?: string,
+    ): Promise<SessionUser> {
+        await this.openIdIdentityModel.createIdentity({
+            userId: sessionUser.userId,
+            issuer: openIdUser.openId.issuer,
+            subject: openIdUser.openId.subject,
+            email: openIdUser.openId.email,
+            issuerType: openIdUser.openId.issuerType,
+            refreshToken,
+        });
+        await this.tryVerifyUserEmail(sessionUser, openIdUser.openId.email);
+        this.analytics.track({
+            userId: sessionUser.userUuid,
+            event: 'user.identity_linked',
+            properties: {
+                loginProvider: openIdUser.openId.issuerType,
+            },
+        });
+
+        if (
+            this.lightdashConfig.groups.enabled &&
+            this.lightdashConfig.auth.enableGroupSync &&
+            Array.isArray(openIdUser.openId.groups) &&
+            openIdUser.openId.groups.length &&
+            sessionUser.organizationUuid
+        ) {
+            await this.tryAddUserToGroups({
+                userUuid: sessionUser.userUuid,
+                groups: openIdUser.openId.groups,
+                organizationUuid: sessionUser.organizationUuid,
+            });
+        }
+
+        return sessionUser;
     }
 
     async completeUserSetup(
@@ -410,12 +928,12 @@ export class UserService {
             await this.organizationModel.update(user.organizationUuid, {
                 name: organizationName,
             });
-            analytics.track({
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'organization.updated',
                 properties: {
                     type:
-                        lightdashConfig.mode === LightdashMode.CLOUD_BETA
+                        this.lightdashConfig.mode === LightdashMode.CLOUD_BETA
                             ? 'cloud'
                             : 'self-hosted',
                     organizationId: user.organizationUuid,
@@ -452,13 +970,16 @@ export class UserService {
             },
         );
 
-        identifyUser(completeUser);
-        analytics.track({
+        this.identifyUser(completeUser);
+        this.analytics.track({
             event: 'user.updated',
             userId: completeUser.userUuid,
             properties: {
                 ...completeUser,
+                updatedUserId: completeUser.userUuid,
+                organizationId: completeUser.organizationUuid,
                 jobTitle,
+                context: 'complete_setup',
             },
         });
         return completeUser;
@@ -476,16 +997,21 @@ export class UserService {
         user: SessionUser,
         openIdentity: DeleteOpenIdentity,
     ): Promise<void> {
+        const userIdentity = await this.openIdIdentityModel.getIdentity(
+            user.userId,
+            openIdentity.issuer,
+            openIdentity.email,
+        );
         await this.openIdIdentityModel.deleteIdentity(
             user.userId,
             openIdentity.issuer,
             openIdentity.email,
         );
-        analytics.track({
+        this.analytics.track({
             userId: user.userUuid,
             event: 'user.identity_removed',
             properties: {
-                loginProvider: 'google',
+                loginProvider: userIdentity.issuerType,
             },
         });
     }
@@ -508,19 +1034,40 @@ export class UserService {
         email: string,
         password: string,
     ): Promise<LightdashUser> {
+        if (
+            (await this.isLoginMethodAllowed(email, LocalIssuerTypes.EMAIL)) ===
+            false
+        ) {
+            throw new ForbiddenError(
+                `User with email ${email} is not allowed to login with password`,
+            );
+        }
+
         try {
-            if (lightdashConfig.auth.disablePasswordAuthentication) {
+            if (this.lightdashConfig.auth.disablePasswordAuthentication) {
                 throw new ForbiddenError(
                     'Password credentials are not allowed',
                 );
             }
             // TODO: move to authorization service layer
+            // TODO we should probably remove the organization from the model
             const user = await this.userModel.getUserByPrimaryEmailAndPassword(
                 email,
                 password,
             );
-            identifyUser(user);
-            analytics.track({
+            if (!user.isActive) {
+                throw new DeactivatedAccountError();
+            }
+            const userOrganization = this.loginToOrganization(
+                user.userUuid,
+                LocalIssuerTypes.EMAIL,
+            );
+            const userWithOrganization = {
+                ...user,
+                ...userOrganization,
+            };
+            this.identifyUser(userWithOrganization);
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'user.logged_in',
                 properties: {
@@ -553,11 +1100,14 @@ export class UserService {
                 user.userUuid,
                 data.password,
             );
-            await this.userModel.updatePassword(user.userId, data.newPassword);
+            await this.userModel.updatePassword(
+                user.userUuid,
+                data.newPassword,
+            );
         } else {
             await this.userModel.createPassword(user.userId, data.newPassword);
         }
-        analytics.track({
+        this.analytics.track({
             userId: user.userUuid,
             event: 'password.updated',
         });
@@ -570,13 +1120,24 @@ export class UserService {
         const updatedUser = await this.userModel.updateUser(
             user.userUuid,
             user.email,
-            data,
+            {
+                firstName: data.firstName,
+                lastName: data.lastName,
+                email: data.email,
+                isMarketingOptedIn: data.isMarketingOptedIn,
+                isTrackingAnonymized: data.isTrackingAnonymized,
+            },
         );
-        identifyUser(updatedUser);
-        analytics.track({
+        this.identifyUser(updatedUser);
+        this.analytics.track({
             userId: updatedUser.userUuid,
             event: 'user.updated',
-            properties: updatedUser,
+            properties: {
+                ...updatedUser,
+                updatedUserId: updatedUser.userUuid,
+                organizationId: updatedUser.organizationUuid,
+                context: 'update_self',
+            },
         });
         return updatedUser;
     }
@@ -592,6 +1153,8 @@ export class UserService {
                 password: user.password,
             });
         } else {
+            await this.checkNewUserRegistrationAllowed(undefined, user.email);
+
             lightdashUser = await this.registerUser({
                 firstName: user.firstName,
                 lastName: user.lastName,
@@ -604,32 +1167,51 @@ export class UserService {
     }
 
     private async registerUser(createUser: CreateUserArgs | OpenIdUser) {
-        if (
-            !isOpenIdUser(createUser) &&
-            lightdashConfig.auth.disablePasswordAuthentication
+        if (isOpenIdUser(createUser)) {
+            if (
+                (await this.isLoginMethodAllowed(
+                    createUser.openId.email,
+                    createUser.openId.issuerType,
+                )) === false
+            ) {
+                throw new ForbiddenError(
+                    `User with email ${createUser.openId.email} is not allowed to login with ${createUser.openId.issuerType}`,
+                );
+            }
+        } else if (
+            (await this.isLoginMethodAllowed(
+                createUser.email,
+                LocalIssuerTypes.EMAIL,
+            )) === false
         ) {
-            throw new ForbiddenError('Password credentials are not allowed');
+            throw new ForbiddenError(
+                `User with email ${createUser.email} is not allowed to login with password`,
+            );
         }
+
         const user = await this.userModel.createUser(createUser);
-        identifyUser({
+        this.identifyUser({
             ...user,
             isMarketingOptedIn: user.isMarketingOptedIn,
         });
-        analytics.track({
+        this.analytics.track({
             event: 'user.created',
             userId: user.userUuid,
             properties: {
+                context: 'accept_invite',
+                createdUserId: user.userUuid,
+                organizationId: user.organizationUuid,
                 userConnectionType: isOpenIdUser(createUser)
-                    ? 'google'
+                    ? createUser.openId.issuerType
                     : 'password',
             },
         });
         if (isOpenIdUser(createUser)) {
-            analytics.track({
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'user.identity_linked',
                 properties: {
-                    loginProvider: 'google',
+                    loginProvider: createUser.openId.issuerType,
                 },
             });
         } else {
@@ -660,7 +1242,7 @@ export class UserService {
                 expiresAt,
                 data.email,
             );
-            analytics.track({
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'password_reset_link.created',
             });
@@ -680,7 +1262,7 @@ export class UserService {
                 data.newPassword,
             );
             await this.passwordResetLinkModel.deleteByCode(link.code);
-            analytics.track({
+            this.analytics.track({
                 userId: user.userUuid,
                 event: 'password_reset_link.used',
             });
@@ -694,6 +1276,20 @@ export class UserService {
             throw new AuthorizationError();
         }
         const { user, personalAccessToken } = results;
+        if (!user.isActive) {
+            throw new DeactivatedAccountError();
+        }
+        if (user.ability.cannot('view', subject('PersonalAccessToken', {}))) {
+            throw new ForbiddenError(
+                'You do not have permission to login with personal access tokens',
+            );
+        }
+        const organization = this.loginToOrganization(
+            user.userUuid,
+            LocalIssuerTypes.API_TOKEN,
+        );
+        const userWithOrganization: SessionUser = { ...user, ...organization };
+
         const now = new Date();
         if (
             personalAccessToken.expiresAt &&
@@ -706,7 +1302,11 @@ export class UserService {
             }
             throw new AuthorizationError();
         }
-        return user;
+        // Update last used date
+        await this.personalAccessTokenModel.updateUsedDate(
+            personalAccessToken.uuid,
+        );
+        return userWithOrganization;
     }
 
     async getSessionByUserUuid(userUuid: string): Promise<SessionUser> {
@@ -723,8 +1323,8 @@ export class UserService {
         user: Pick<SessionUser, 'userUuid'>,
     ): Promise<EmailStatusExpiring> {
         const passcode =
-            lightdashConfig.mode === LightdashMode.PR ||
-            lightdashConfig.mode === LightdashMode.DEV
+            this.lightdashConfig.mode === LightdashMode.PR ||
+            this.lightdashConfig.mode === LightdashMode.DEV
                 ? '000000'
                 : randomInt(999999).toString().padStart(6, '0');
         const emailStatus = await this.emailModel.createPrimaryEmailOtp({
@@ -861,7 +1461,7 @@ export class UserService {
                 : undefined,
         );
 
-        await analytics.track({
+        await this.analytics.track({
             userId: user.userUuid,
             event: 'user.joined_organization',
             properties: {
@@ -874,6 +1474,42 @@ export class UserService {
         });
     }
 
+    async loginToOrganization(
+        userUuid: string,
+        loginMethod: LoginOptionTypes,
+    ): Promise<
+        Pick<
+            LightdashUser,
+            'organizationUuid' | 'organizationCreatedAt' | 'organizationName'
+        >
+    > {
+        const organizations = await this.userModel.getOrganizationsForUser(
+            userUuid,
+        );
+        if (organizations.length === 0) {
+            throw new NotExistsError('User not part of any organization');
+        } else if (organizations.length > 1) {
+            throw new ForbiddenError('User is part of multiple organizations');
+        }
+        // TODO check valid login methods allowed in org
+        // const organization = await this.organizationModel.get(organizations[0].organization_uuid)
+        return organizations[0];
+    }
+
+    async findSessionUser(passportUser: { id: string; organization: string }) {
+        const user = await wrapSentryTransaction(
+            'Passport.deserializeUser',
+            {},
+            () =>
+                this.userModel.findSessionUserAndOrgByUuid(
+                    passportUser.id,
+                    passportUser.organization,
+                ),
+        );
+
+        return user;
+    }
+
     private static async generateGoogleAccessToken(
         refreshToken: string,
     ): Promise<string> {
@@ -881,12 +1517,31 @@ export class UserService {
             refresh.requestNewAccessToken(
                 'google',
                 refreshToken,
-                (err: any, accessToken: string) => {
+                (err: AnyType, accessToken: string, _refreshToken, result) => {
                     if (err || !accessToken) {
                         reject(err);
                         return;
                     }
-                    resolve(accessToken);
+
+                    const scopes: string[] =
+                        result && typeof result.scope === 'string'
+                            ? result.scope.split(' ')
+                            : [];
+                    if (
+                        scopes.includes(
+                            'https://www.googleapis.com/auth/drive.file',
+                        ) &&
+                        scopes.includes(
+                            'https://www.googleapis.com/auth/spreadsheets',
+                        )
+                    ) {
+                        resolve(accessToken);
+                    }
+                    reject(
+                        new AuthorizationError(
+                            'Missing authorization to access Google Drive',
+                        ),
+                    );
                 },
             );
         });
@@ -907,6 +1562,26 @@ export class UserService {
         return accessToken;
     }
 
+    async isLoginMethodAllowed(_email: string, loginMethod: LoginOptionTypes) {
+        switch (loginMethod) {
+            case LocalIssuerTypes.EMAIL:
+                return !this.lightdashConfig.auth.disablePasswordAuthentication;
+            case LocalIssuerTypes.API_TOKEN:
+            case OpenIdIdentityIssuerType.GOOGLE:
+            case OpenIdIdentityIssuerType.OKTA:
+            case OpenIdIdentityIssuerType.ONELOGIN:
+            case OpenIdIdentityIssuerType.AZUREAD:
+            case OpenIdIdentityIssuerType.GENERIC_OIDC:
+                return true;
+            default:
+                assertUnreachable(
+                    loginMethod,
+                    `Invalid login method ${loginMethod} provided.`,
+                );
+        }
+        return true;
+    }
+
     /**
      * This method is used on the scheduler to perform the actions on Google Drive for that user
      * @param user
@@ -914,5 +1589,167 @@ export class UserService {
      */
     async getRefreshToken(userUuid: string): Promise<string> {
         return this.userModel.getRefreshToken(userUuid);
+    }
+
+    async getWarehouseCredentials(user: SessionUser) {
+        return this.userWarehouseCredentialsModel.getAllByUserUuid(
+            user.userUuid,
+        );
+    }
+
+    async createWarehouseCredentials(
+        user: SessionUser,
+        data: UpsertUserWarehouseCredentials,
+    ) {
+        const userWarehouseCredentialsUuid =
+            await this.userWarehouseCredentialsModel.create(
+                user.userUuid,
+                data,
+            );
+        this.analytics.track({
+            userId: user.userUuid,
+            event: 'user_warehouse_credentials.created',
+            properties: {
+                credentialsId: userWarehouseCredentialsUuid,
+                warehouseType: data.credentials.type,
+            },
+        });
+        return this.userWarehouseCredentialsModel.getByUuid(
+            userWarehouseCredentialsUuid,
+        );
+    }
+
+    async updateWarehouseCredentials(
+        user: SessionUser,
+        userWarehouseCredentialsUuid: string,
+        data: UpsertUserWarehouseCredentials,
+    ) {
+        await this.userWarehouseCredentialsModel.update(
+            user.userUuid,
+            userWarehouseCredentialsUuid,
+            data,
+        );
+        this.analytics.track({
+            userId: user.userUuid,
+            event: 'user_warehouse_credentials.updated',
+            properties: {
+                credentialsId: userWarehouseCredentialsUuid,
+                warehouseType: data.credentials.type,
+            },
+        });
+        return this.userWarehouseCredentialsModel.getByUuid(
+            userWarehouseCredentialsUuid,
+        );
+    }
+
+    async deleteWarehouseCredentials(
+        user: SessionUser,
+        userWarehouseCredentialsUuid: string,
+    ) {
+        await this.userWarehouseCredentialsModel.delete(
+            user.userUuid,
+            userWarehouseCredentialsUuid,
+        );
+        this.analytics.track({
+            userId: user.userUuid,
+            event: 'user_warehouse_credentials.deleted',
+            properties: {
+                credentialsId: userWarehouseCredentialsUuid,
+            },
+        });
+    }
+
+    private getRedirectUri(issuer: OpenIdIdentityIssuerType) {
+        switch (issuer) {
+            case OpenIdIdentityIssuerType.AZUREAD:
+                return this.lightdashConfig.auth.azuread.loginPath;
+            case OpenIdIdentityIssuerType.GOOGLE:
+                return this.lightdashConfig.auth.google.loginPath;
+            case OpenIdIdentityIssuerType.OKTA:
+                return this.lightdashConfig.auth.okta.loginPath;
+            case OpenIdIdentityIssuerType.ONELOGIN:
+                return this.lightdashConfig.auth.oneLogin.loginPath;
+            case OpenIdIdentityIssuerType.GENERIC_OIDC:
+                return this.lightdashConfig.auth.oidc.loginPath;
+            default:
+                assertUnreachable(
+                    issuer,
+                    `Invalid login option for issuer ${issuer}`,
+                );
+        }
+        return undefined;
+    }
+
+    private getInstanceLoginOptions() {
+        const options = new Set<LoginOptionTypes>();
+        if (!this.lightdashConfig.auth.disablePasswordAuthentication) {
+            options.add(LocalIssuerTypes.EMAIL);
+        }
+        if (this.lightdashConfig.auth.google.enabled) {
+            options.add(OpenIdIdentityIssuerType.GOOGLE);
+        }
+        if (this.lightdashConfig.auth.azuread?.oauth2ClientId !== undefined) {
+            options.add(OpenIdIdentityIssuerType.AZUREAD);
+        }
+        if (this.lightdashConfig.auth.oneLogin?.oauth2ClientId) {
+            options.add(OpenIdIdentityIssuerType.ONELOGIN);
+        }
+        if (this.lightdashConfig.auth.okta?.oauth2ClientId) {
+            options.add(OpenIdIdentityIssuerType.OKTA);
+        }
+        if (this.lightdashConfig.auth.oidc.clientId) {
+            options.add(OpenIdIdentityIssuerType.GENERIC_OIDC);
+        }
+        return options;
+    }
+
+    async getLoginOptions(email?: string): Promise<LoginOptions> {
+        const instancesOptions = this.getInstanceLoginOptions();
+        if (!email) {
+            return {
+                showOptions: Array.from(instancesOptions),
+                forceRedirect: false,
+                redirectUri: undefined,
+            };
+        }
+
+        const openIdIssuers = await this.userModel.getOpenIdIssuers(email);
+        const hasPassword = await this.userModel.hasPasswordByEmail(email);
+        const userOptions = hasPassword
+            ? [LocalIssuerTypes.EMAIL, ...openIdIssuers]
+            : openIdIssuers;
+        // Filter out the options that are not available for the instance. eg: user connected to google drive but google auth is not enabled
+        const validUserOptions = userOptions.filter((option) =>
+            instancesOptions.has(option),
+        );
+
+        // if user has no valid options, return instance options
+        if (validUserOptions.length === 0) {
+            return {
+                showOptions: Array.from(instancesOptions),
+                forceRedirect: false,
+                redirectUri: undefined,
+            };
+        }
+
+        const oidcOptions = validUserOptions.filter(isOpenIdIdentityIssuerType);
+        if (oidcOptions.length === 1) {
+            // Force redirect to the only issuer option
+            return {
+                showOptions: validUserOptions,
+                forceRedirect: true,
+                redirectUri: new URL(
+                    `/api/v1${this.getRedirectUri(
+                        oidcOptions[0],
+                    )}?login_hint=${encodeURIComponent(email)}`,
+                    this.lightdashConfig.siteUrl,
+                ).href,
+            };
+        }
+        return {
+            showOptions: validUserOptions,
+            forceRedirect: false,
+            redirectUri: undefined,
+        };
     }
 }

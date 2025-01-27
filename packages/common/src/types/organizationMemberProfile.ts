@@ -1,4 +1,5 @@
-import { Group } from './groups';
+import { type Group } from './groups';
+import { type KnexPaginatedData } from './knex-paginate';
 
 export enum OrganizationMemberRole {
     MEMBER = 'member',
@@ -9,6 +10,11 @@ export enum OrganizationMemberRole {
     ADMIN = 'admin',
 }
 
+export const isOrganizationMemberRole = (
+    x: string,
+): x is OrganizationMemberRole =>
+    Object.values(OrganizationMemberRole).includes(x as OrganizationMemberRole);
+
 /**
  * Profile for a user's membership in an organization
  */
@@ -18,6 +24,8 @@ export type OrganizationMemberProfile = {
      * @format uuid
      */
     userUuid: string;
+    userCreatedAt: Date;
+    userUpdatedAt: Date;
     firstName: string;
     lastName: string;
     email: string;
@@ -30,18 +38,26 @@ export type OrganizationMemberProfile = {
      */
     role: OrganizationMemberRole;
     /**
-     * Whether the user has accepted their invite to the organization
+     * Whether the user can login
      */
     isActive: boolean;
     /**
      * Whether the user's invite to the organization has expired
      */
     isInviteExpired?: boolean;
+    /**
+     * Whether the user doesn't have an authentication method (password or openId)
+     */
+    isPending?: boolean;
 };
 
 export type OrganizationMemberProfileWithGroups = OrganizationMemberProfile & {
     groups: Pick<Group, 'name' | 'uuid'>[];
 };
+
+export const isOrganizationMemberProfileWithGroups = (
+    obj: OrganizationMemberProfile | OrganizationMemberProfileWithGroups,
+): obj is OrganizationMemberProfileWithGroups => 'groups' in obj;
 
 export type OrganizationMemberProfileUpdate = {
     role: OrganizationMemberRole;
@@ -49,7 +65,7 @@ export type OrganizationMemberProfileUpdate = {
 
 export type ApiOrganizationMemberProfiles = {
     status: 'ok';
-    results: OrganizationMemberProfile[];
+    results: KnexPaginatedData<OrganizationMemberProfile[]>;
 };
 
 export type ApiOrganizationMemberProfile = {

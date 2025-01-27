@@ -1,19 +1,17 @@
 import {
-    fieldId as getFieldId,
+    getItemId,
     hashFieldReference,
     isField,
     isMetric,
 } from '@lightdash/common';
 import { Menu, Text } from '@mantine/core';
 import { IconArrowBarToDown } from '@tabler/icons-react';
-import { FC, useCallback, useMemo } from 'react';
-import { useTracking } from '../../providers/TrackingProvider';
+import { useCallback, useMemo, type FC } from 'react';
+import useTracking from '../../providers/Tracking/useTracking';
 import { EventName } from '../../types/Events';
 import MantineIcon from '../common/MantineIcon';
-import {
-    DrillDownConfig,
-    useMetricQueryDataContext,
-} from './MetricQueryDataProvider';
+import { type DrillDownConfig } from './types';
+import { useMetricQueryDataContext } from './useMetricQueryDataContext';
 
 type DrillDownMenuItemProps = Partial<DrillDownConfig> & {
     trackingData: {
@@ -38,7 +36,7 @@ const DrillDownMenuItem: FC<DrillDownMenuItemProps> = ({
 
         return pivotReference !== undefined
             ? hashFieldReference(pivotReference)
-            : getFieldId(item);
+            : getItemId(item);
     }, [item, pivotReference]);
 
     const value = fieldId ? fieldValues?.[fieldId]?.formatted : undefined;

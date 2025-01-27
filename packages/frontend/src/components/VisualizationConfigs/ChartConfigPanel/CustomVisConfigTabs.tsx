@@ -1,8 +1,9 @@
 import { Loader, Tabs } from '@mantine/core';
-import Editor, { EditorProps, Monaco } from '@monaco-editor/react';
+import Editor, { type EditorProps, type Monaco } from '@monaco-editor/react';
 import merge from 'lodash/merge';
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { useCustomVisualizationContext } from '../../CustomVisualization';
+import { isCustomVisualizationConfig } from '../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
 
 type Schema = {
     readonly uri: string;
@@ -65,21 +66,31 @@ const loadMonaco = (monaco: Monaco, schemas: Schema[]) => {
 };
 
 const CustomVisConfigTabs: React.FC = memo(() => {
-    const { chartConfig, setChartConfig, rows, fields } =
-        useCustomVisualizationContext();
+    const { visualizationConfig } = useVisualizationContext();
+
+    const isCustomConfig = isCustomVisualizationConfig(visualizationConfig);
+
     const [isLoading, setIsLoading] = useState(true);
     const schemas = useRef<Schema[] | null>(null);
 
     useEffect(() => {
-        initVegaLazySchema(fields).then((vegaSchemas) => {
-            schemas.current = vegaSchemas;
+        if (!isCustomConfig) return;
+        const fields = visualizationConfig.chartConfig.fields || [];
+
+        async function initVegaAsync() {
+            schemas.current = await initVegaLazySchema(fields);
             setIsLoading(false);
-        });
-    }, [fields]);
+        }
+
+        void initVegaAsync();
+    }, [isCustomConfig, visualizationConfig.chartConfig]);
 
     if (isLoading) {
         return <Loader color="gray" size="xs" />;
     }
+
+    if (!isCustomConfig) return null;
+    const { visSpec, setVisSpec, series } = visualizationConfig.chartConfig;
 
     return (
         <Tabs
@@ -108,8 +119,8 @@ const CustomVisConfigTabs: React.FC = memo(() => {
                     }
                     defaultLanguage="json"
                     options={{ ...MONACO_DEFAULT_OPTIONS }}
-                    value={chartConfig}
-                    onChange={(config) => setChartConfig(config ?? '')}
+                    value={visSpec}
+                    onChange={(config) => setVisSpec(config ?? '')}
                 />
             </Tabs.Panel>
 
@@ -121,7 +132,7 @@ const CustomVisConfigTabs: React.FC = memo(() => {
                         ...MONACO_DEFAULT_OPTIONS,
                         readOnly: true,
                     }}
-                    defaultValue={JSON.stringify(rows, null, 2)}
+                    defaultValue={JSON.stringify(series, null, 2)}
                 />
             </Tabs.Panel>
         </Tabs>

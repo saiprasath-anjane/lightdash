@@ -1,4 +1,12 @@
-import { ActionIcon, Skeleton, Stack, TextInput } from '@mantine/core';
+import { ExploreType, type SummaryExplore } from '@lightdash/common';
+import {
+    ActionIcon,
+    Divider,
+    Skeleton,
+    Stack,
+    Text,
+    TextInput,
+} from '@mantine/core';
 import {
     IconAlertCircle,
     IconAlertTriangle,
@@ -7,17 +15,16 @@ import {
 } from '@tabler/icons-react';
 import Fuse from 'fuse.js';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { useHistory, useParams } from 'react-router-dom';
-
-import { SummaryExplore } from '@lightdash/common';
+import { useNavigate, useParams } from 'react-router';
 import { useExplores } from '../../../hooks/useExplores';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
-import { TrackSection } from '../../../providers/TrackingProvider';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import MantineIcon from '../../common/MantineIcon';
 import PageBreadcrumbs from '../../common/PageBreadcrumbs';
 import SuboptimalState from '../../common/SuboptimalState/SuboptimalState';
 import ExplorePanel from '../ExplorePanel';
+import { ItemDetailProvider } from '../ExploreTree/TableTree/ItemDetailProvider';
 import ExploreGroup from './ExploreGroup';
 import ExploreNavLink from './ExploreNavLink';
 
@@ -36,47 +43,61 @@ const LoadingSkeleton = () => (
 );
 
 const BasePanel = () => {
-    const history = useHistory();
+    const navigate = useNavigate();
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const [search, setSearch] = useState<string>('');
     const exploresResult = useExplores(projectUuid, true);
 
-    const [exploreGroupMap, ungroupedExplores] = useMemo(() => {
-        const validSearch = search ? search.toLowerCase() : '';
-        if (exploresResult.data) {
-            let explores = Object.values(exploresResult.data);
-            if (validSearch !== '') {
-                explores = new Fuse(Object.values(exploresResult.data), {
-                    keys: ['label'],
-                    ignoreLocation: true,
-                    threshold: 0.3,
-                })
-                    .search(validSearch)
-                    .map((res) => res.item);
-            }
+    const [exploreGroupMap, defaultUngroupedExplores, customUngroupedExplores] =
+        useMemo(() => {
+            const validSearch = search ? search.toLowerCase() : '';
+            if (exploresResult.data) {
+                let explores = Object.values(exploresResult.data);
+                if (validSearch !== '') {
+                    explores = new Fuse(Object.values(exploresResult.data), {
+                        keys: ['label'],
+                        ignoreLocation: true,
+                        threshold: 0.3,
+                    })
+                        .search(validSearch)
+                        .map((res) => res.item);
+                }
 
-            return explores.reduce<
-                [Record<string, SummaryExplore[]>, SummaryExplore[]]
-            >(
-                (acc, explore) => {
-                    if (explore.groupLabel) {
-                        return [
-                            {
-                                ...acc[0],
-                                [explore.groupLabel]: acc[0][explore.groupLabel]
-                                    ? [...acc[0][explore.groupLabel], explore]
-                                    : [explore],
-                            },
-                            acc[1],
-                        ];
-                    }
-                    return [acc[0], [...acc[1], explore]];
-                },
-                [{}, []],
-            );
-        }
-        return [{}, []];
-    }, [exploresResult.data, search]);
+                return explores.reduce<
+                    [
+                        Record<string, SummaryExplore[]>,
+                        SummaryExplore[],
+                        SummaryExplore[],
+                    ]
+                >(
+                    (acc, explore) => {
+                        if (explore.groupLabel) {
+                            return [
+                                {
+                                    ...acc[0],
+                                    [explore.groupLabel]: acc[0][
+                                        explore.groupLabel
+                                    ]
+                                        ? [
+                                              ...acc[0][explore.groupLabel],
+                                              explore,
+                                          ]
+                                        : [explore],
+                                },
+                                acc[1],
+                                acc[2],
+                            ];
+                        }
+                        if (explore.type === ExploreType.VIRTUAL) {
+                            return [acc[0], acc[1], [...acc[2], explore]];
+                        }
+                        return [acc[0], [...acc[1], explore], acc[2]];
+                    },
+                    [{}, [], []],
+                );
+            }
+            return [{}, [], []];
+        }, [exploresResult.data, search]);
 
     if (exploresResult.status === 'loading') {
         return <LoadingSkeleton />;
@@ -94,63 +115,96 @@ const BasePanel = () => {
     if (exploresResult.data) {
         return (
             <>
-                <PageBreadcrumbs
-                    size="md"
-                    items={[{ title: 'Tables', active: true }]}
-                />
+                <ItemDetailProvider>
+                    <PageBreadcrumbs
+                        size="md"
+                        items={[{ title: 'Tables', active: true }]}
+                    />
 
-                <TextInput
-                    icon={<MantineIcon icon={IconSearch} />}
-                    rightSection={
-                        search ? (
-                            <ActionIcon onClick={() => setSearch('')}>
-                                <MantineIcon icon={IconX} />
-                            </ActionIcon>
-                        ) : null
-                    }
-                    placeholder="Search tables"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                />
+                    <TextInput
+                        icon={<MantineIcon icon={IconSearch} />}
+                        rightSection={
+                            search ? (
+                                <ActionIcon onClick={() => setSearch('')}>
+                                    <MantineIcon icon={IconX} />
+                                </ActionIcon>
+                            ) : null
+                        }
+                        placeholder="Search tables"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
 
-                <Stack spacing="xxs" sx={{ flexGrow: 1, overflowY: 'auto' }}>
-                    {Object.keys(exploreGroupMap)
-                        .sort((a, b) => a.localeCompare(b))
-                        .map((groupLabel) => (
-                            <ExploreGroup label={groupLabel} key={groupLabel}>
-                                {exploreGroupMap[groupLabel]
-                                    .sort((a, b) =>
-                                        a.label.localeCompare(b.label),
-                                    )
-                                    .map((explore) => (
-                                        <ExploreNavLink
-                                            key={explore.name}
-                                            explore={explore}
-                                            query={search}
-                                            onClick={() => {
-                                                history.push(
-                                                    `/projects/${projectUuid}/tables/${explore.name}`,
-                                                );
-                                            }}
-                                        />
-                                    ))}
-                            </ExploreGroup>
-                        ))}
-                    {ungroupedExplores
-                        .sort((a, b) => a.label.localeCompare(b.label))
-                        .map((explore) => (
-                            <ExploreNavLink
-                                key={explore.name}
-                                explore={explore}
-                                query={search}
-                                onClick={() => {
-                                    history.push(
-                                        `/projects/${projectUuid}/tables/${explore.name}`,
-                                    );
-                                }}
-                            />
-                        ))}
-                </Stack>
+                    <Stack
+                        spacing="xxs"
+                        sx={{ flexGrow: 1, overflowY: 'auto' }}
+                    >
+                        {Object.keys(exploreGroupMap)
+                            .sort((a, b) => a.localeCompare(b))
+                            .map((groupLabel) => (
+                                <ExploreGroup
+                                    label={groupLabel}
+                                    key={groupLabel}
+                                >
+                                    {exploreGroupMap[groupLabel]
+                                        .sort((a, b) =>
+                                            a.label.localeCompare(b.label),
+                                        )
+                                        .map((explore) => (
+                                            <ExploreNavLink
+                                                key={explore.name}
+                                                explore={explore}
+                                                query={search}
+                                                onClick={() => {
+                                                    void navigate(
+                                                        `/projects/${projectUuid}/tables/${explore.name}`,
+                                                    );
+                                                }}
+                                            />
+                                        ))}
+                                </ExploreGroup>
+                            ))}
+                        {defaultUngroupedExplores
+                            .sort((a, b) => a.label.localeCompare(b.label))
+                            .map((explore) => (
+                                <ExploreNavLink
+                                    key={explore.name}
+                                    explore={explore}
+                                    query={search}
+                                    onClick={() => {
+                                        void navigate(
+                                            `/projects/${projectUuid}/tables/${explore.name}`,
+                                        );
+                                    }}
+                                />
+                            ))}
+
+                        {customUngroupedExplores.length ? (
+                            <>
+                                <Divider size={0.5} c="gray.5" my="xs" />
+
+                                <Text fw={500} fz="xs" c="gray.6" mb="xs">
+                                    Virtual Views
+                                </Text>
+                            </>
+                        ) : null}
+
+                        {customUngroupedExplores
+                            .sort((a, b) => a.label.localeCompare(b.label))
+                            .map((explore) => (
+                                <ExploreNavLink
+                                    key={explore.name}
+                                    explore={explore}
+                                    query={search}
+                                    onClick={() => {
+                                        void navigate(
+                                            `/projects/${projectUuid}/tables/${explore.name}`,
+                                        );
+                                    }}
+                                />
+                            ))}
+                    </Stack>
+                </ItemDetailProvider>
             </>
         );
     }
@@ -172,22 +226,16 @@ const ExploreSideBar = memo(() => {
     const clearExplore = useExplorerContext(
         (context) => context.actions.clearExplore,
     );
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const handleBack = useCallback(() => {
         clearExplore();
-        history.push(`/projects/${projectUuid}/tables`);
-    }, [clearExplore, history, projectUuid]);
+        void navigate(`/projects/${projectUuid}/tables`);
+    }, [clearExplore, navigate, projectUuid]);
 
     return (
         <TrackSection name={SectionName.SIDEBAR}>
-            <Stack h="100%" sx={{ flexGrow: 1 }}>
-                {!tableName ? (
-                    <BasePanel />
-                ) : (
-                    <ExplorePanel onBack={handleBack} />
-                )}
-            </Stack>
+            {!tableName ? <BasePanel /> : <ExplorePanel onBack={handleBack} />}
         </TrackSection>
     );
 });

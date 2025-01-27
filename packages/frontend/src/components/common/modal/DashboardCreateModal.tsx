@@ -1,26 +1,29 @@
-import { Dashboard, Space } from '@lightdash/common';
+import { subject } from '@casl/ability';
+import { type Dashboard, type Space } from '@lightdash/common';
 import {
     ActionIcon,
+    Box,
     Button,
     Group,
     MantineProvider,
     Modal,
-    ModalProps,
     Select,
     Stack,
     Text,
+    Textarea,
     TextInput,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconFolder, IconX } from '@tabler/icons-react';
-import { FC, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FC } from 'react';
 import { useCreateMutation } from '../../../hooks/dashboard/useDashboard';
 import {
     useCreateMutation as useSpaceCreateMutation,
     useSpaceSummaries,
 } from '../../../hooks/useSpaces';
-import { useApp } from '../../../providers/AppProvider';
+import useApp from '../../../providers/App/useApp';
 import MantineIcon from '../MantineIcon';
 
 interface DashboardCreateModalProps extends ModalProps {
@@ -36,11 +39,11 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
     onClose,
     ...modalProps
 }) => {
+    const { user } = useApp();
     const { mutateAsync: createDashboard, isLoading: isCreatingDashboard } =
         useCreateMutation(projectUuid);
     const { mutateAsync: createSpace, isLoading: isCreatingSpace } =
         useSpaceCreateMutation(projectUuid);
-    const { user } = useApp();
 
     const form = useForm({
         initialValues: {
@@ -59,10 +62,22 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
 
     const {
         data: spaces,
-        isLoading: isLoadingSpaces,
+        isInitialLoading: isLoadingSpaces,
         isSuccess,
     } = useSpaceSummaries(projectUuid, true, {
         staleTime: 0,
+        select: (data) => {
+            // Only get spaces that the user can create dashboards to
+            return data.filter((space) =>
+                user.data?.ability.can(
+                    'create',
+                    subject('Dashboard', {
+                        ...space,
+                        access: space.userAccess ? [space.userAccess] : [],
+                    }),
+                ),
+            );
+        },
         onSuccess: (data) => {
             if (data.length > 0) {
                 setSpacesOptions(
@@ -118,6 +133,7 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
                 description: data.dashboardDescription,
                 spaceUuid: newSpace?.uuid || data.spaceUuid,
                 tiles: [],
+                tabs: [], // add default tab
             });
             onConfirm?.(dashboard);
             form.reset();
@@ -125,14 +141,16 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
         [createDashboard, createSpace, onConfirm, form],
     );
 
-    if (user.data?.ability?.cannot('manage', 'Dashboard')) return null;
-
     if (isLoadingSpaces || !spaces) return null;
 
     return (
         <MantineProvider inherit theme={{ colorScheme: 'light' }}>
             <Modal
-                title={<Title order={5}>Create dashboard</Title>}
+                title={
+                    <Box>
+                        <Title order={4}>Create Dashboard</Title>
+                    </Box>
+                }
                 onClose={() => handleClose()}
                 {...modalProps}
             >
@@ -148,17 +166,26 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
                             required
                             {...form.getInputProps('dashboardName')}
                         />
-                        <TextInput
+                        <Textarea
                             label="Dashboard description"
                             placeholder="A few words to give your team some context"
                             disabled={isCreatingDashboard}
+                            autosize
+                            maxRows={3}
                             {...form.getInputProps('dashboardDescription')}
                         />
                         {!isLoadingSpaces && spaces ? (
                             <Stack spacing="xs">
                                 <Select
                                     searchable
-                                    creatable
+                                    creatable={user.data?.ability.can(
+                                        'create',
+                                        subject('Space', {
+                                            organizationUuid:
+                                                user.data?.organizationUuid,
+                                            projectUuid,
+                                        }),
+                                    )}
                                     clearable
                                     withinPortal
                                     label={

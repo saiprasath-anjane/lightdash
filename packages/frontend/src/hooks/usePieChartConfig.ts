@@ -1,18 +1,22 @@
 import {
-    ApiQueryResults,
-    CustomDimension,
-    Dimension,
     formatItemValue,
     isField,
     isMetric,
-    ItemsMap,
-    Metric,
-    PieChart,
-    PieChartLegendPosition,
+    isTableCalculation,
+    PieChartLegendLabelMaxLengthDefault,
     PieChartLegendPositionDefault,
-    PieChartValueOptions,
-    ResultRow,
-    ResultValue,
+    type ApiQueryResults,
+    type CustomDimension,
+    type Dimension,
+    type ItemsMap,
+    type Metric,
+    type PieChart,
+    type PieChartLegendPosition,
+    type PieChartValueOptions,
+    type ResultRow,
+    type ResultValue,
+    type TableCalculation,
+    type TableCalculationMetadata,
 } from '@lightdash/common';
 import { useDebouncedValue } from '@mantine/hooks';
 import isEmpty from 'lodash/isEmpty';
@@ -33,7 +37,7 @@ type PieChartConfig = {
     groupRemove: (dimensionId: string) => void;
 
     metricId: string | null;
-    selectedMetric: Metric | undefined;
+    selectedMetric: Metric | TableCalculation | undefined;
     metricChange: (metricId: string | null) => void;
 
     isDonut: boolean;
@@ -68,7 +72,8 @@ type PieChartConfig = {
     toggleShowLegend: () => void;
     legendPosition: PieChartLegendPosition;
     legendPositionChange: (position: PieChartLegendPosition) => void;
-
+    legendMaxItemLength: number | undefined;
+    legendMaxItemLengthChange: (length: number | undefined) => void;
     data: {
         name: string;
         value: number;
@@ -84,8 +89,9 @@ export type PieChartConfigFn = (
     pieChartConfig: PieChart | undefined,
     itemsMap: ItemsMap | undefined,
     dimensions: Record<string, CustomDimension | Dimension>,
-    numericMetrics: Record<string, Metric>,
+    numericMetrics: Record<string, Metric | TableCalculation>,
     colorPalette: string[],
+    tableCalculationsMetadata?: TableCalculationMetadata[],
 ) => PieChartConfig;
 
 const usePieChartConfig: PieChartConfigFn = (
@@ -95,6 +101,7 @@ const usePieChartConfig: PieChartConfigFn = (
     dimensions,
     numericMetrics,
     colorPalette,
+    tableCalculationsMetadata,
 ) => {
     const [groupFieldIds, setGroupFieldIds] = useState(
         pieChartConfig?.groupFieldIds ?? [],
@@ -103,7 +110,6 @@ const usePieChartConfig: PieChartConfigFn = (
     const [metricId, setMetricId] = useState(pieChartConfig?.metricId ?? null);
 
     const [isDonut, setIsDonut] = useState(pieChartConfig?.isDonut ?? true);
-
     const [valueLabel, setValueLabel] = useState(
         pieChartConfig?.valueLabel ?? 'hidden',
     );
@@ -150,6 +156,13 @@ const usePieChartConfig: PieChartConfigFn = (
         pieChartConfig?.legendPosition ?? PieChartLegendPositionDefault,
     );
 
+    const [legendMaxItemLength, setLegendMaxItemLength] = useState<
+        number | undefined
+    >(
+        pieChartConfig?.legendMaxItemLength ??
+            PieChartLegendLabelMaxLengthDefault,
+    );
+
     const dimensionIds = useMemo(() => Object.keys(dimensions), [dimensions]);
 
     const allNumericMetricIds = useMemo(
@@ -161,7 +174,8 @@ const usePieChartConfig: PieChartConfigFn = (
         if (!itemsMap || !metricId) return undefined;
         const item = itemsMap[metricId];
 
-        if (isField(item) && isMetric(item)) return item;
+        if ((isField(item) && isMetric(item)) || isTableCalculation(item))
+            return item;
 
         return undefined;
     }, [itemsMap, metricId]);
@@ -169,7 +183,7 @@ const usePieChartConfig: PieChartConfigFn = (
     const isLoading = !resultsData;
 
     useEffect(() => {
-        if (isLoading) return;
+        if (isLoading || dimensionIds.length === 0) return;
 
         const newGroupFieldIds = groupFieldIds.filter((id) =>
             dimensionIds.includes(id),
@@ -187,11 +201,26 @@ const usePieChartConfig: PieChartConfigFn = (
     }, [isLoading, dimensionIds, groupFieldIds, pieChartConfig?.groupFieldIds]);
 
     useEffect(() => {
-        if (isLoading) return;
+        if (isLoading || allNumericMetricIds.length === 0) return;
         if (metricId && allNumericMetricIds.includes(metricId)) return;
 
+        /**
+         * When table calculations update, their name changes, so we need to update the selected fields
+         * If the selected field is a table calculation with the old name in the metadata, set it to the new name
+         */
+        if (tableCalculationsMetadata) {
+            const metricTcIndex = tableCalculationsMetadata.findIndex(
+                (tc) => tc.oldName === metricId,
+            );
+
+            if (metricTcIndex !== -1) {
+                setMetricId(tableCalculationsMetadata[metricTcIndex].name);
+                return;
+            }
+        }
+
         setMetricId(allNumericMetricIds[0] ?? null);
-    }, [isLoading, allNumericMetricIds, metricId, pieChartConfig?.metricId]);
+    }, [allNumericMetricIds, isLoading, metricId, tableCalculationsMetadata]);
 
     const isValueLabelOverriden = useMemo(() => {
         return Object.values(groupValueOptionOverrides).some(
@@ -220,6 +249,14 @@ const usePieChartConfig: PieChartConfigFn = (
             !groupFieldIds ||
             groupFieldIds.length === 0
         ) {
+            return [];
+        }
+
+        const isMetricPresentInResults = resultsData?.rows.some(
+            (r) => r[metricId],
+        );
+
+        if (!isMetricPresentInResults) {
             return [];
         }
 
@@ -283,10 +320,9 @@ const usePieChartConfig: PieChartConfigFn = (
 
     const groupColorDefaults = useMemo(() => {
         return Object.fromEntries(
-            groupLabels.map((name, index) => [
-                name,
-                colorPalette[index % colorPalette.length],
-            ]),
+            groupLabels.map((name, index) => {
+                return [name, colorPalette[index % colorPalette.length]];
+            }),
         );
     }, [groupLabels, colorPalette]);
 
@@ -422,6 +458,7 @@ const usePieChartConfig: PieChartConfigFn = (
             ),
             showLegend,
             legendPosition,
+            legendMaxItemLength,
         }),
         [
             groupFieldIds,
@@ -437,6 +474,7 @@ const usePieChartConfig: PieChartConfigFn = (
             groupSortOverrides,
             showLegend,
             legendPosition,
+            legendMaxItemLength,
         ],
     );
 
@@ -481,7 +519,8 @@ const usePieChartConfig: PieChartConfigFn = (
         toggleShowLegend: () => setShowLegend((prev) => !prev),
         legendPosition,
         legendPositionChange: handleLegendPositionChange,
-
+        legendMaxItemLength,
+        legendMaxItemLengthChange: setLegendMaxItemLength,
         data,
     };
 };

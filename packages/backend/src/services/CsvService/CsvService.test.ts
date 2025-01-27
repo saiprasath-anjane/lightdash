@@ -1,39 +1,77 @@
 import * as fs from 'fs/promises';
 import moment from 'moment';
-import { s3Client } from '../../clients/clients';
+import { analyticsMock } from '../../analytics/LightdashAnalytics.mock';
+import { S3Client } from '../../clients/Aws/s3';
+import { S3CacheClient } from '../../clients/Aws/S3CacheClient';
+import EmailClient from '../../clients/EmailClient/EmailClient';
 import { lightdashConfig } from '../../config/lightdashConfig';
-import {
-    dashboardModel,
-    savedChartModel,
-    userModel,
-} from '../../models/models';
-import { projectService } from '../services';
+import { AnalyticsModel } from '../../models/AnalyticsModel';
+import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
+import { ContentModel } from '../../models/ContentModel/ContentModel';
+import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
+import { DownloadFileModel } from '../../models/DownloadFileModel';
+import { EmailModel } from '../../models/EmailModel';
+import { GroupsModel } from '../../models/GroupsModel';
+import { JobModel } from '../../models/JobModel/JobModel';
+import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
+import { SavedChartModel } from '../../models/SavedChartModel';
+import { SavedSqlModel } from '../../models/SavedSqlModel';
+import { SpaceModel } from '../../models/SpaceModel';
+import { SshKeyPairModel } from '../../models/SshKeyPairModel';
+import type { TagsModel } from '../../models/TagsModel';
+import { UserAttributesModel } from '../../models/UserAttributesModel';
+import { UserModel } from '../../models/UserModel';
+import { UserWarehouseCredentialsModel } from '../../models/UserWarehouseCredentials/UserWarehouseCredentialsModel';
+import { WarehouseAvailableTablesModel } from '../../models/WarehouseAvailableTablesModel/WarehouseAvailableTablesModel';
+import { SchedulerClient } from '../../scheduler/SchedulerClient';
+import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
+import { ProjectService } from '../ProjectService/ProjectService';
 import { CsvService } from './CsvService';
 import { itemMap, metricQuery } from './CsvService.mock';
-
-jest.mock('../../clients/clients', () => ({
-    schedulerClient: {},
-    s3Client: {},
-}));
-
-jest.mock('../../models/models', () => ({
-    savedChartModel: {},
-    dashboardModel: {},
-    userModel: {},
-}));
-
-jest.mock('../services', () => ({
-    projectService: {},
-}));
 
 describe('Csv service', () => {
     const csvService = new CsvService({
         lightdashConfig,
-        userModel,
-        projectService,
-        s3Client,
-        savedChartModel,
-        dashboardModel,
+        analytics: analyticsMock,
+        userModel: {} as UserModel,
+        projectService: new ProjectService({
+            lightdashConfig,
+            analytics: analyticsMock,
+            analyticsModel: {} as AnalyticsModel,
+            dashboardModel: {} as DashboardModel,
+            emailClient: {} as EmailClient,
+            jobModel: {} as JobModel,
+            onboardingModel: {} as OnboardingModel,
+            projectModel: {} as ProjectModel,
+            s3CacheClient: {} as S3CacheClient,
+            savedChartModel: {} as SavedChartModel,
+            spaceModel: {} as SpaceModel,
+            sshKeyPairModel: {} as SshKeyPairModel,
+            userAttributesModel: {} as UserAttributesModel,
+            userWarehouseCredentialsModel: {} as UserWarehouseCredentialsModel,
+            warehouseAvailableTablesModel: {} as WarehouseAvailableTablesModel,
+            emailModel: {
+                getPrimaryEmailStatus: (userUuid: string) => ({
+                    isVerified: true,
+                }),
+            } as unknown as EmailModel,
+            schedulerClient: {} as SchedulerClient,
+            downloadFileModel: {} as DownloadFileModel,
+            s3Client: {} as S3Client,
+            groupsModel: {} as GroupsModel,
+            tagsModel: {} as TagsModel,
+            catalogModel: {} as CatalogModel,
+            contentModel: {} as ContentModel,
+            encryptionUtil: {} as EncryptionUtil,
+        }),
+        s3Client: {} as S3Client,
+        savedChartModel: {} as SavedChartModel,
+        dashboardModel: {} as DashboardModel,
+        downloadFileModel: {} as DownloadFileModel,
+        schedulerClient: {} as SchedulerClient,
+        projectModel: {} as ProjectModel,
+        savedSqlModel: {} as SavedSqlModel,
     });
 
     it('Should convert rows to CSV with format', async () => {
@@ -212,5 +250,39 @@ $4.00,value_4,2020-03-16
         expect(CsvService.generateFileId('payment', true)).toContain(
             `csv-incomplete_results-payment-`,
         );
+    });
+
+    it('isValidCsvFileId', async () => {
+        const time = moment('2023-09-07 12:13:45.123');
+        const timestamp = time.format('YYYY-MM-DD-HH-mm-ss-SSSS');
+
+        const validNames = [
+            `csv-payment-${timestamp}.csv`,
+            `csv-mytable-${timestamp}.csv`,
+            `csv-my_table-${timestamp}.csv`,
+            `csv-table_-${timestamp}.csv`,
+            `csv-this_is_a_chart_title-${timestamp}.csv`,
+            `csv-another_table_for_testing_-${timestamp}.csv`,
+            `csv-weird_chars_-${timestamp}.csv`,
+            `csv-incomplete_results-payment-${timestamp}.csv`,
+        ];
+
+        const invalidNames = [
+            `without_prefix-${timestamp}.csv`,
+            `csv-without_suffix-${timestamp}`,
+            `csv-no_timestamp.csv`,
+            `csv-with space-${timestamp}.csv`,
+            `csv-UPPERCASED-${timestamp}.csv`,
+        ];
+        validNames.forEach((name) => {
+            expect(name + CsvService.isValidCsvFileId(name)).toEqual(
+                name + true,
+            );
+        });
+        invalidNames.forEach((name) => {
+            expect(name + CsvService.isValidCsvFileId(name)).toEqual(
+                name + false,
+            );
+        });
     });
 });

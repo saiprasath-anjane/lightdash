@@ -1,4 +1,4 @@
-import { ResourceViewDashboardItem } from '@lightdash/common';
+import { type ResourceViewDashboardItem } from '@lightdash/common';
 import {
     Box,
     Flex,
@@ -10,21 +10,23 @@ import {
 } from '@mantine/core';
 import { useDisclosure, useHover } from '@mantine/hooks';
 import { IconEye } from '@tabler/icons-react';
-import { FC, ReactNode } from 'react';
+import { type FC, type ReactNode } from 'react';
 import { ResourceIcon } from '../../ResourceIcon';
 import ResourceViewActionMenu, {
-    ResourceViewActionMenuCommonProps,
+    type ResourceViewActionMenuCommonProps,
 } from '../ResourceActionMenu';
 import { getResourceViewsSinceWhenDescription } from '../resourceUtils';
 
 interface ResourceViewGridDashboardItemProps
     extends Pick<ResourceViewActionMenuCommonProps, 'onAction'> {
     item: ResourceViewDashboardItem;
+    allowDelete?: boolean;
     dragIcon: ReactNode;
 }
 
 const ResourceViewGridDashboardItem: FC<ResourceViewGridDashboardItemProps> = ({
     item,
+    allowDelete,
     onAction,
     dragIcon,
 }) => {
@@ -91,13 +93,14 @@ const ResourceViewGridDashboardItem: FC<ResourceViewGridDashboardItemProps> = ({
                         opacity: hovered || opened ? 1 : 0,
                     }}
                     component="div"
-                    onClick={(e) => {
+                    onClick={(e: React.MouseEvent<HTMLDivElement>) => {
                         e.stopPropagation();
                         e.preventDefault();
                     }}
                 >
                     <ResourceViewActionMenu
                         item={item}
+                        allowDelete={allowDelete}
                         isOpen={opened}
                         onOpen={handlers.open}
                         onClose={handlers.close}

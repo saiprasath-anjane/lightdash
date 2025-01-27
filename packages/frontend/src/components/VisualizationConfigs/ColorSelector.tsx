@@ -6,7 +6,7 @@ import {
     TextInput,
 } from '@mantine/core';
 import { IconHash } from '@tabler/icons-react';
-import { FC } from 'react';
+import { type FC } from 'react';
 import { isHexCodeColor } from '../../utils/colorUtils';
 import MantineIcon from '../common/MantineIcon';
 
@@ -14,7 +14,7 @@ interface Props {
     color?: string;
     defaultColor?: string;
     swatches: string[];
-    onColorChange: (newColor: string) => void;
+    onColorChange?: (newColor: string) => void;
 }
 
 const ColorSelector: FC<Props> = ({
@@ -26,13 +26,13 @@ const ColorSelector: FC<Props> = ({
     const isValidHexColor = color && isHexCodeColor(color);
 
     return (
-        <Popover shadow="md" withArrow>
+        <Popover shadow="md" withArrow disabled={!onColorChange}>
             <Popover.Target>
                 <ColorSwatch
-                    size={24}
+                    size={20}
                     color={isValidHexColor ? color : defaultColor}
                     sx={{
-                        cursor: 'pointer',
+                        cursor: onColorChange ? 'pointer' : 'default',
                         transition: 'opacity 100ms ease',
                         '&:hover': { opacity: 0.8 },
                     }}
@@ -42,15 +42,20 @@ const ColorSelector: FC<Props> = ({
             <Popover.Dropdown p="xs">
                 <Stack spacing="xs">
                     <MantineColorPicker
-                        size="md"
+                        size="sm"
                         format="hex"
                         swatches={swatches}
-                        swatchesPerRow={swatches.length}
+                        swatchesPerRow={8}
                         value={color ?? defaultColor}
-                        onChange={(newColor) => onColorChange(newColor)}
+                        onChange={(newColor) => {
+                            if (onColorChange) {
+                                onColorChange(newColor);
+                            }
+                        }}
                     />
 
                     <TextInput
+                        size="xs"
                         icon={<MantineIcon icon={IconHash} />}
                         placeholder="Type in a custom HEX color"
                         error={
@@ -61,9 +66,11 @@ const ColorSelector: FC<Props> = ({
                         value={(color ?? '').replace('#', '')}
                         onChange={(event) => {
                             const newColor = event.currentTarget.value;
-                            onColorChange(
-                                newColor === '' ? newColor : `#${newColor}`,
-                            );
+                            if (onColorChange) {
+                                onColorChange(
+                                    newColor === '' ? newColor : `#${newColor}`,
+                                );
+                            }
                         }}
                     />
                 </Stack>

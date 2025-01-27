@@ -1,7 +1,4 @@
 import {
-    AdditionalMetric,
-    CustomDimension,
-    Field,
     formatItemValue,
     friendlyName,
     getItemMap,
@@ -11,11 +8,18 @@ import {
     isField,
     isNumericItem,
     itemsInMetricQuery,
-    ItemsMap,
-    TableCalculation,
+    type AdditionalMetric,
+    type CustomDimension,
+    type Field,
+    type ItemsMap,
+    type RawResultRow,
+    type ResultRow,
+    type ResultValue,
+    type TableCalculation,
 } from '@lightdash/common';
 import { Group, Tooltip } from '@mantine/core';
 import { IconExclamationCircle } from '@tabler/icons-react';
+import { type CellContext } from '@tanstack/react-table';
 import { useMemo } from 'react';
 import MantineIcon from '../components/common/MantineIcon';
 import {
@@ -23,8 +27,12 @@ import {
     TableHeaderLabelContainer,
     TableHeaderRegularLabel,
 } from '../components/common/Table/Table.styles';
-import { columnHelper, TableColumn } from '../components/common/Table/types';
-import { useExplorerContext } from '../providers/ExplorerProvider';
+import {
+    columnHelper,
+    type TableColumn,
+} from '../components/common/Table/types';
+import { formatRowValueFromWarehouse } from '../components/DataViz/formatters/formatRowValueFromWarehouse';
+import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import { useCalculateTotal } from './useCalculateTotal';
 import { useExplore } from './useExplore';
 
@@ -37,6 +45,26 @@ export const getItemBgColor = (
     } else {
         return '#d2dfd7';
     }
+};
+
+export const getFormattedValueCell = (
+    info: CellContext<ResultRow, { value: ResultValue }>,
+) => <span>{info.getValue()?.value.formatted || '-'}</span>;
+
+export const getRawValueCell = (
+    info: CellContext<ResultRow, { value: ResultValue }>,
+) => {
+    let raw = info.getValue()?.value.raw;
+    if (raw === null) return '∅';
+    if (raw === undefined) return '-';
+    if (raw instanceof Date) return <span>{raw.toISOString()}</span>;
+    return <span>{`${raw}`}</span>;
+};
+
+export const getValueCell = (info: CellContext<RawResultRow, string>) => {
+    const value = info.getValue();
+    const formatted = formatRowValueFromWarehouse(value);
+    return <span>{formatted}</span>;
 };
 
 export const useColumns = (): TableColumn[] => {
@@ -69,29 +97,44 @@ export const useColumns = (): TableColumn[] => {
         refetchOnMount: false,
     });
 
+    const itemsMap = useMemo<ItemsMap | undefined>(() => {
+        if (exploreData) {
+            // Explore items for new columns and result items for existing columns with format overrides
+            return {
+                ...getItemMap(
+                    exploreData,
+                    additionalMetrics,
+                    tableCalculations,
+                    customDimensions,
+                ),
+                ...(resultsData?.fields || {}),
+            };
+        }
+    }, [
+        resultsData,
+        exploreData,
+        additionalMetrics,
+        tableCalculations,
+        customDimensions,
+    ]);
+
     const { activeItemsMap, invalidActiveItems } = useMemo<{
         activeItemsMap: ItemsMap;
         invalidActiveItems: string[];
     }>(() => {
-        if (exploreData) {
-            const allItemsMap = getItemMap(
-                exploreData,
-                additionalMetrics,
-                tableCalculations,
-                customDimensions,
-            );
-
+        if (itemsMap) {
             return Array.from(activeFields).reduce<{
                 activeItemsMap: ItemsMap;
                 invalidActiveItems: string[];
             }>(
                 (acc, key) => {
-                    return allItemsMap[key]
+                    const item = itemsMap?.[key];
+                    return item
                         ? {
                               ...acc,
                               activeItemsMap: {
                                   ...acc.activeItemsMap,
-                                  [key]: allItemsMap[key],
+                                  [key]: item,
                               },
                           }
                         : {
@@ -106,13 +149,7 @@ export const useColumns = (): TableColumn[] => {
             );
         }
         return { activeItemsMap: {}, invalidActiveItems: [] };
-    }, [
-        additionalMetrics,
-        exploreData,
-        tableCalculations,
-        activeFields,
-        customDimensions,
-    ]);
+    }, [itemsMap, activeFields]);
 
     const { data: totals } = useCalculateTotal({
         metricQuery: resultsData?.metricQuery,
@@ -158,7 +195,7 @@ export const useColumns = (): TableColumn[] => {
                             )}
                         </TableHeaderLabelContainer>
                     ),
-                    cell: (info) => info.getValue()?.value.formatted || '-',
+                    cell: getFormattedValueCell,
                     footer: () =>
                         totals?.[fieldId]
                             ? formatItemValue(item, totals[fieldId])
@@ -189,7 +226,7 @@ export const useColumns = (): TableColumn[] => {
                     {
                         id: fieldId,
                         header: () => (
-                            <Group ff="Inter" spacing="two">
+                            <Group spacing="two">
                                 <Tooltip
                                     withinPortal
                                     label="This field was not found in the dbt project."
@@ -209,7 +246,7 @@ export const useColumns = (): TableColumn[] => {
                                 </TableHeaderBoldLabel>
                             </Group>
                         ),
-                        cell: (info) => info.getValue()?.value.formatted || '-',
+                        cell: getFormattedValueCell,
                         meta: {
                             isInvalidItem: true,
                         },

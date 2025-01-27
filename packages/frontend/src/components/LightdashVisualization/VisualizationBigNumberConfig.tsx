@@ -1,26 +1,7 @@
-import { ChartType, ItemsMap } from '@lightdash/common';
-import { FC, useEffect } from 'react';
+import { ChartType } from '@lightdash/common';
+import { useEffect, type FC } from 'react';
 import useBigNumberConfig from '../../hooks/useBigNumberConfig';
-import {
-    VisualizationConfig,
-    VisualizationConfigCommon,
-} from './VisualizationProvider';
-
-export type VisualizationConfigBigNumber = {
-    chartType: ChartType.BIG_NUMBER;
-    chartConfig: ReturnType<typeof useBigNumberConfig>;
-};
-
-export const isBigNumberVisualizationConfig = (
-    visualizationConfig: VisualizationConfig | undefined,
-): visualizationConfig is VisualizationConfigBigNumber => {
-    return visualizationConfig?.chartType === ChartType.BIG_NUMBER;
-};
-
-type VisualizationBigNumberConfigProps =
-    VisualizationConfigCommon<VisualizationConfigBigNumber> & {
-        itemsMap: ItemsMap | undefined;
-    };
+import { type VisualizationBigNumberConfigProps } from './types';
 
 const VisualizationBigNumberConfig: FC<VisualizationBigNumberConfigProps> = ({
     itemsMap,
@@ -28,11 +9,13 @@ const VisualizationBigNumberConfig: FC<VisualizationBigNumberConfigProps> = ({
     initialChartConfig,
     onChartConfigChange,
     children,
+    tableCalculationsMetadata,
 }) => {
     const bigNumberConfig = useBigNumberConfig(
         initialChartConfig,
         resultsData,
         itemsMap,
+        tableCalculationsMetadata,
     );
 
     useEffect(() => {

@@ -1,9 +1,9 @@
 import {
-    ApiError,
-    PinnedItems,
-    UpdatePinnedItemOrder,
+    type ApiError,
+    type PinnedItems,
+    type UpdatePinnedItemOrder,
 } from '@lightdash/common';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { lightdashApi } from '../../api';
 import useToaster from '../toaster/useToaster';
 
@@ -27,24 +27,30 @@ const updatePinnedItemsOrder = async (
 };
 
 export const usePinnedItems = (
-    projectUuid: string,
+    projectUuid: string | undefined,
     pinnedlistUuid: string | undefined,
 ) =>
     useQuery<PinnedItems, ApiError>({
         queryKey: ['pinned_items', projectUuid, pinnedlistUuid],
-        queryFn: () => getPinnedItems(projectUuid, pinnedlistUuid || ''),
-        enabled: !!pinnedlistUuid,
+        queryFn: () => getPinnedItems(projectUuid!, pinnedlistUuid || ''),
+        enabled: !!pinnedlistUuid && !!projectUuid,
     });
 
-export const useReorder = (projectUuid: string, pinnedlistUuid: string) => {
+export const useReorder = (
+    projectUuid: string | undefined,
+    pinnedlistUuid: string,
+) => {
     const queryClient = useQueryClient();
-    const { showToastError } = useToaster();
+    const { showToastApiError } = useToaster();
     return useMutation<PinnedItems, ApiError, PinnedItems>(
         (pinnedItems) => {
             queryClient.setQueryData(
                 ['pinned_items', projectUuid, pinnedlistUuid],
                 pinnedItems,
             );
+            if (!projectUuid) {
+                return Promise.reject();
+            }
             return updatePinnedItemsOrder(
                 projectUuid,
                 pinnedlistUuid,
@@ -65,9 +71,10 @@ export const useReorder = (projectUuid: string, pinnedlistUuid: string) => {
                     pinnedlistUuid,
                 ]);
             },
-            onError: (error) => {
-                showToastError({
-                    title: `Could not re-order pinned items. Please try again. Error: ${error.error}`,
+            onError: ({ error }) => {
+                showToastApiError({
+                    title: `Could not re-order pinned items`,
+                    apiError: error,
                 });
             },
         },

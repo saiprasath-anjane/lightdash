@@ -4,10 +4,9 @@ import {
     SupportedDbtVersions,
 } from '@lightdash/common';
 import { WarehouseClient } from '@lightdash/warehouses';
-import { writeFileSync } from 'fs';
+import fs, { writeFileSync } from 'fs';
 import * as fspromises from 'fs/promises';
 import * as path from 'path';
-import tempy from 'tempy';
 import {
     LIGHTDASH_PROFILE_NAME,
     LIGHTDASH_TARGET_NAME,
@@ -25,6 +24,8 @@ type DbtLocalCredentialsProjectAdapterArgs = {
     environment: DbtProjectEnvironmentVariable[] | undefined;
     cachedWarehouse: CachedWarehouse;
     dbtVersion: SupportedDbtVersions;
+    useDbtLs: boolean;
+    selector?: string;
 };
 
 export class DbtLocalCredentialsProjectAdapter extends DbtLocalProjectAdapter {
@@ -38,9 +39,12 @@ export class DbtLocalCredentialsProjectAdapter extends DbtLocalProjectAdapter {
         environment,
         cachedWarehouse,
         dbtVersion,
+        useDbtLs,
+        selector,
     }: DbtLocalCredentialsProjectAdapterArgs) {
-        const profilesDir = tempy.directory();
+        const profilesDir = fs.mkdtempSync('/tmp/local_');
         const profilesFilename = path.join(profilesDir, 'profiles.yml');
+
         const {
             profile,
             environment: injectedEnvironment,
@@ -76,6 +80,8 @@ export class DbtLocalCredentialsProjectAdapter extends DbtLocalProjectAdapter {
             environment: updatedEnvironment,
             cachedWarehouse,
             dbtVersion,
+            useDbtLs,
+            selector,
         });
         this.profilesDir = profilesDir;
     }

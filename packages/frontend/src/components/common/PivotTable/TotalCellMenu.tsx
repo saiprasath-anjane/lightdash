@@ -1,5 +1,5 @@
-import { Menu, MenuProps } from '@mantine/core';
-import { FC } from 'react';
+import { Menu, type MenuProps } from '@mantine/core';
+import { type FC } from 'react';
 
 import { IconCopy } from '@tabler/icons-react';
 import MantineIcon from '../MantineIcon';
@@ -8,7 +8,7 @@ type TotalCellMenuProps = {
     onCopy: () => void;
 } & Pick<MenuProps, 'opened' | 'onOpen' | 'onClose'>;
 
-const TotalCellMenu: FC<TotalCellMenuProps> = ({
+const TotalCellMenu: FC<React.PropsWithChildren<TotalCellMenuProps>> = ({
     children,
     opened,
     onOpen,

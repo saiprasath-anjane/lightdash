@@ -1,28 +1,10 @@
-import { SimpleGrid } from '@mantine/core';
-import startCase from 'lodash/startCase';
-import { FC } from 'react';
-import UnitInput from '../../../common/UnitInput';
-import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/VisualizationConfigCartesian';
-import { useVisualizationContext } from '../../../LightdashVisualization/VisualizationProvider';
+import { type FC } from 'react';
+import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
+import { UnitInputsGrid } from '../common/UnitInputsGrid';
+import { defaultGrid } from './constants';
 
-export const defaultGrid = {
-    containLabel: true,
-    left: '5%', // small padding
-    right: '5%', // small padding
-    top: '70px', // pixels from top (makes room for legend)
-    bottom: '30px', // pixels from bottom (makes room for x-axis)
-} as const;
-
-const POSITIONS = ['left', 'right', 'top', 'bottom'] as const;
-
-enum Units {
-    Pixels = 'px',
-    Percentage = '%',
-}
-
-const units = Object.values(Units);
-
-const GridPanel: FC = () => {
+export const Grid: FC = () => {
     const { visualizationConfig } = useVisualizationContext();
 
     if (!isCartesianVisualizationConfig(visualizationConfig)) return null;
@@ -41,20 +23,11 @@ const GridPanel: FC = () => {
     };
 
     return (
-        <SimpleGrid cols={2} spacing="md">
-            {POSITIONS.map((position) => (
-                <UnitInput
-                    key={position}
-                    name={position}
-                    label={startCase(position)}
-                    units={units}
-                    value={config[position] || ''}
-                    defaultValue={defaultGrid[position]}
-                    onChange={(value) => handleUpdate(position, value)}
-                />
-            ))}
-        </SimpleGrid>
+        <UnitInputsGrid
+            centerLabel="Margin"
+            config={config}
+            defaultConfig={defaultGrid}
+            onChange={(position, newValue) => handleUpdate(position, newValue)}
+        />
     );
 };
-
-export default GridPanel;

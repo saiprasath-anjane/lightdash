@@ -1,38 +1,38 @@
-import { Stack, Title } from '@mantine/core';
-import { FC, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
-import ErrorState from '../components/common/ErrorState';
-import ForbiddenPanel from '../components/ForbiddenPanel';
-import PageSpinner from '../components/PageSpinner';
-
 import {
     ResourceItemCategory,
     ResourceViewItemType,
     wrapResource,
 } from '@lightdash/common';
+import { Stack, Title } from '@mantine/core';
 import { IconLayoutDashboard } from '@tabler/icons-react';
+import { useMemo, type FC } from 'react';
+import { useParams } from 'react-router';
+import ErrorState from '../components/common/ErrorState';
 import ResourceView from '../components/common/ResourceView';
-import { SortDirection } from '../components/common/ResourceView/ResourceViewList';
+import { ResourceSortDirection } from '../components/common/ResourceView/types';
+import ForbiddenPanel from '../components/ForbiddenPanel';
+import PageSpinner from '../components/PageSpinner';
 import { usePinnedItems } from '../hooks/pinning/usePinnedItems';
 import { useProjectSavedChartStatus } from '../hooks/useOnboardingStatus';
 import {
     useMostPopularAndRecentlyUpdated,
     useProject,
 } from '../hooks/useProject';
-import { useApp } from '../providers/AppProvider';
+import useApp from '../providers/App/useApp';
 
 const MobileHome: FC = () => {
     const params = useParams<{ projectUuid: string }>();
     const selectedProjectUuid = params.projectUuid;
     const savedChartStatus = useProjectSavedChartStatus(selectedProjectUuid);
     const project = useProject(selectedProjectUuid);
-
-    const { data: pinnedItems = [], isLoading: pinnedItemsLoading } =
-        usePinnedItems(selectedProjectUuid, project.data?.pinnedListUuid);
+    const pinnedItems = usePinnedItems(
+        selectedProjectUuid,
+        project.data?.pinnedListUuid,
+    );
 
     const {
         data: mostPopularAndRecentlyUpdated,
-        isLoading: isMostPopularAndRecentlyUpdatedLoading,
+        isInitialLoading: isMostPopularAndRecentlyUpdatedLoading,
     } = useMostPopularAndRecentlyUpdated(selectedProjectUuid);
 
     const { user } = useApp();
@@ -47,18 +47,20 @@ const MobileHome: FC = () => {
                 ),
                 category: ResourceItemCategory.MOST_POPULAR,
             })) ?? [];
-        const pinnedItemsWithCategory = pinnedItems.map((item) => ({
-            ...item,
-            category: ResourceItemCategory.PINNED,
-        }));
+        const pinnedItemsWithCategory =
+            pinnedItems.data?.map((item) => ({
+                ...item,
+                category: ResourceItemCategory.PINNED,
+            })) ?? [];
+
         return [...pinnedItemsWithCategory, ...mostPopularItems];
     }, [mostPopularAndRecentlyUpdated, pinnedItems]);
 
     const isLoading =
-        project.isLoading ||
-        savedChartStatus.isLoading ||
+        project.isInitialLoading ||
+        savedChartStatus.isInitialLoading ||
         isMostPopularAndRecentlyUpdatedLoading ||
-        pinnedItemsLoading;
+        pinnedItems.isInitialLoading;
     const error = project.error || savedChartStatus.error;
 
     if (user.data?.ability?.cannot('view', 'SavedChart')) {
@@ -92,7 +94,7 @@ const MobileHome: FC = () => {
             <ResourceView
                 items={items}
                 tabs={
-                    pinnedItems.length > 0
+                    pinnedItems.data && pinnedItems.data.length > 0
                         ? [
                               {
                                   id: 'pinned',
@@ -114,7 +116,7 @@ const MobileHome: FC = () => {
                         : undefined
                 }
                 listProps={{
-                    defaultSort: { updatedAt: SortDirection.DESC },
+                    defaultSort: { updatedAt: ResourceSortDirection.DESC },
                     defaultColumnVisibility: {
                         space: false,
                         updatedAt: false,

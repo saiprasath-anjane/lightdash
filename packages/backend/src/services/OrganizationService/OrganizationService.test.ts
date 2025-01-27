@@ -1,37 +1,37 @@
 import { LightdashInstallType } from '@lightdash/common';
-import {
-    groupsModel,
-    inviteLinkModel,
-    onboardingModel,
-    organizationAllowedEmailDomainsModel,
-    organizationMemberProfileModel,
-    organizationModel,
-    projectModel,
-    userModel,
-} from '../../models/models';
+import { analyticsMock } from '../../analytics/LightdashAnalytics.mock';
+import { lightdashConfigMock } from '../../config/lightdashConfig.mock';
+import { GroupsModel } from '../../models/GroupsModel';
+import { InviteLinkModel } from '../../models/InviteLinkModel';
+import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import { OrganizationAllowedEmailDomainsModel } from '../../models/OrganizationAllowedEmailDomainsModel';
+import { OrganizationMemberProfileModel } from '../../models/OrganizationMemberProfileModel';
+import { OrganizationModel } from '../../models/OrganizationModel';
+import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
+import { UserModel } from '../../models/UserModel';
 import { OrganizationService } from './OrganizationService';
 import { organization, user } from './OrganizationService.mock';
 
-jest.mock('../../models/models', () => ({
-    projectModel: {
-        hasProjects: jest.fn(async () => true),
-    },
-    organizationModel: {
-        get: jest.fn(async () => organization),
-    },
-    organizationAllowedEmailDomainsModel: {},
-    groupsModel: {},
-}));
+const projectModel = {
+    hasProjects: jest.fn(async () => true),
+};
+const organizationModel = {
+    get: jest.fn(async () => organization),
+};
+
 describe('organization service', () => {
     const organizationService = new OrganizationService({
-        organizationModel,
-        projectModel,
-        onboardingModel,
-        inviteLinkModel,
-        organizationMemberProfileModel,
-        userModel,
-        organizationAllowedEmailDomainsModel,
-        groupsModel,
+        lightdashConfig: lightdashConfigMock,
+        analytics: analyticsMock,
+        organizationModel: organizationModel as unknown as OrganizationModel,
+        projectModel: projectModel as unknown as ProjectModel,
+        onboardingModel: {} as OnboardingModel,
+        inviteLinkModel: {} as InviteLinkModel,
+        organizationMemberProfileModel: {} as OrganizationMemberProfileModel,
+        userModel: {} as UserModel,
+        organizationAllowedEmailDomainsModel:
+            {} as OrganizationAllowedEmailDomainsModel,
+        groupsModel: {} as GroupsModel,
     });
 
     afterEach(() => {

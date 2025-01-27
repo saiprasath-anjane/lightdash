@@ -1,20 +1,20 @@
 import {
-    ApiError,
-    ApiJobStatusResponse,
-    ApiTestSchedulerResponse,
-    CreateSchedulerAndTargets,
-    SchedulerAndTargets,
     SchedulerJobStatus,
-    SchedulerWithLogs,
+    type ApiError,
+    type ApiJobStatusResponse,
+    type ApiTestSchedulerResponse,
+    type CreateSchedulerAndTargets,
+    type SchedulerAndTargets,
+    type SchedulerWithLogs,
 } from '@lightdash/common';
 import { notifications } from '@mantine/notifications';
-import { useMemo } from 'react';
 import {
     useMutation,
     useQuery,
     useQueryClient,
-    UseQueryOptions,
-} from 'react-query';
+    type UseQueryOptions,
+} from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { lightdashApi } from '../../../api';
 import useToaster from '../../../hooks/toaster/useToaster';
 
@@ -32,8 +32,12 @@ const getSchedulerLogs = async (projectUuid: string) =>
         body: undefined,
     });
 
-const getSchedulerJobStatus = async (jobId: string) =>
-    lightdashApi<ApiJobStatusResponse['results']>({
+export const getSchedulerJobStatus = async <
+    T = ApiJobStatusResponse['results'],
+>(
+    jobId: string,
+) =>
+    lightdashApi<T extends ApiJobStatusResponse['results'] ? T : never>({
         url: `/schedulers/job/${jobId}/status`,
         method: 'GET',
         body: undefined,
@@ -47,12 +51,13 @@ const sendNowScheduler = async (scheduler: CreateSchedulerAndTargets) =>
     });
 
 export const useScheduler = (
-    uuid: string,
+    uuid: string | null,
     useQueryOptions?: UseQueryOptions<SchedulerAndTargets, ApiError>,
 ) =>
     useQuery<SchedulerAndTargets, ApiError>({
         queryKey: ['scheduler', uuid],
-        queryFn: () => getScheduler(uuid),
+        queryFn: () => getScheduler(uuid!),
+        enabled: !!uuid,
         ...useQueryOptions,
     });
 
@@ -71,6 +76,8 @@ const getJobStatus = async (
         .then((data) => {
             if (data.status === SchedulerJobStatus.COMPLETED) {
                 return onComplete();
+            } else if (data.status === SchedulerJobStatus.ERROR) {
+                onError(new Error(data.details?.error || 'Job failed'));
             } else {
                 setTimeout(
                     () => getJobStatus(jobId, onComplete, onError),
@@ -84,18 +91,23 @@ const getJobStatus = async (
 };
 
 export const pollJobStatus = async (jobId: string) => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<void>((resolve, reject) =>
         getJobStatus(
             jobId,
             () => resolve(),
             (error) => reject(error),
-        );
-    });
+        ),
+    );
 };
 
 export const useSendNowScheduler = () => {
     const queryClient = useQueryClient();
-    const { showToastError, showToastInfo, showToastSuccess } = useToaster();
+    const {
+        showToastError,
+        showToastInfo,
+        showToastSuccess,
+        showToastApiError,
+    } = useToaster();
 
     const sendNowMutation = useMutation<
         ApiTestSchedulerResponse['results'],
@@ -112,12 +124,12 @@ export const useSendNowScheduler = () => {
             return sendNowScheduler(res);
         },
         {
-            mutationKey: 'sendNowScheduler',
+            mutationKey: ['sendNowScheduler'],
             onSuccess: () => {},
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: 'Failed to process job',
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
@@ -125,7 +137,10 @@ export const useSendNowScheduler = () => {
 
     const { data: sendNowData } = sendNowMutation;
 
-    const { data: scheduledDeliveryJobStatus } = useQuery(
+    const { data: scheduledDeliveryJobStatus } = useQuery<
+        ApiJobStatusResponse['results'] | undefined,
+        ApiError
+    >(
         ['jobStatus', sendNowData?.jobId],
         () => {
             if (!sendNowData?.jobId) return;
@@ -184,10 +199,10 @@ export const useSendNowScheduler = () => {
                     );
                 }
             },
-            onError: (error: { error: Error }) => {
-                showToastError({
+            onError: async ({ error }) => {
+                showToastApiError({
                     title: 'Error polling job status',
-                    subtitle: error?.error?.message,
+                    apiError: error,
                 });
 
                 setTimeout(
@@ -198,9 +213,12 @@ export const useSendNowScheduler = () => {
                     1000,
                 );
 
-                queryClient.cancelQueries(['jobStatus', sendNowData?.jobId]);
+                await queryClient.cancelQueries([
+                    'jobStatus',
+                    sendNowData?.jobId,
+                ]);
             },
-            enabled: sendNowData && sendNowData?.jobId !== undefined,
+            enabled: Boolean(sendNowData && sendNowData?.jobId !== undefined),
         },
     );
 

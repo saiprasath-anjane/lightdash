@@ -1,17 +1,18 @@
 import {
-    AdditionalMetric,
-    CompiledTable,
-    CustomDimension,
+    type AdditionalMetric,
+    type CompiledTable,
+    type CustomDimension,
 } from '@lightdash/common';
-import { Group, MantineProvider, NavLink, Text, Tooltip } from '@mantine/core';
+import { MantineProvider, NavLink, Text } from '@mantine/core';
 import { IconTable } from '@tabler/icons-react';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useToggle } from 'react-use';
 
 import { getMantineThemeOverride } from '../../../../mantineTheme';
-import { TrackSection } from '../../../../providers/TrackingProvider';
+import { TrackSection } from '../../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../../types/Events';
 import MantineIcon from '../../../common/MantineIcon';
+import { TableItemDetailPreview } from './ItemDetailPreview';
 import TableTreeSections from './TableTreeSections';
 
 type TableTreeWrapperProps = {
@@ -20,32 +21,32 @@ type TableTreeWrapperProps = {
     table: CompiledTable;
 };
 
-const TableTreeWrapper: FC<TableTreeWrapperProps> = ({
+const TableTreeWrapper: FC<React.PropsWithChildren<TableTreeWrapperProps>> = ({
     isOpen,
     toggle,
     table,
     children,
 }) => {
+    const [isHover, toggleHover] = useToggle(false);
+
     return (
         <NavLink
             opened={isOpen}
             onChange={toggle}
+            onMouseEnter={() => toggleHover(true)}
+            onMouseLeave={() => toggleHover(false)}
             icon={<MantineIcon icon={IconTable} size="lg" color="gray.7" />}
             label={
-                <Tooltip
-                    label={table.description}
-                    position="top-start"
-                    withinPortal
-                    maw={350}
-                    multiline
-                    sx={{ whiteSpace: 'normal' }}
+                <TableItemDetailPreview
+                    label={table.label}
+                    description={table.description}
+                    showPreview={isHover}
+                    closePreview={() => toggleHover(false)}
                 >
-                    <Group>
-                        <Text truncate fw={600}>
-                            {table.label}
-                        </Text>
-                    </Group>
-                </Tooltip>
+                    <Text truncate fw={600}>
+                        {table.label}
+                    </Text>
+                </TableItemDetailPreview>
             }
             styles={{
                 root: {
@@ -70,9 +71,18 @@ type Props = {
     onSelectedNodeChange: (itemId: string, isDimension: boolean) => void;
     missingCustomMetrics: AdditionalMetric[];
     customDimensions?: CustomDimension[];
+    missingCustomDimensions?: CustomDimension[];
+    missingFields?: {
+        all: string[];
+        customDimensions: CustomDimension[] | undefined;
+        customMetrics: AdditionalMetric[] | undefined;
+    };
+    selectedDimensions?: string[];
 };
 
-const EmptyWrapper: FC = ({ children }) => <>{children}</>;
+const EmptyWrapper: FC<React.PropsWithChildren<{}>> = ({ children }) => (
+    <>{children}</>
+);
 
 const themeOverride = getMantineThemeOverride({
     components: {
@@ -98,7 +108,10 @@ const TableTree: FC<Props> = ({
     additionalMetrics,
     customDimensions,
     missingCustomMetrics,
+    missingCustomDimensions,
     searchQuery,
+    missingFields,
+    selectedDimensions,
     ...rest
 }) => {
     const Wrapper = showTableLabel ? TableTreeWrapper : EmptyWrapper;
@@ -117,7 +130,8 @@ const TableTree: FC<Props> = ({
                         searchQuery={searchQuery}
                         additionalMetrics={additionalMetrics}
                         customDimensions={customDimensions}
-                        missingCustomMetrics={missingCustomMetrics}
+                        missingFields={missingFields}
+                        selectedDimensions={selectedDimensions}
                         {...rest}
                     />
                 </Wrapper>

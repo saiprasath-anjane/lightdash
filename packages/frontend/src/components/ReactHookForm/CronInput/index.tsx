@@ -1,12 +1,18 @@
 import { Group } from '@mantine/core';
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useState,
+    type FC,
+    type PropsWithChildren,
+} from 'react';
 import {
     Controller,
-    ControllerRenderProps,
-    FieldValues,
     useFormContext,
+    type ControllerRenderProps,
+    type FieldValues,
 } from 'react-hook-form';
-import { InputWrapperProps } from '../InputWrapper';
+import { type InputWrapperProps } from '../InputWrapper';
 import {
     Frequency,
     getFrequencyCronExpression,
@@ -23,15 +29,17 @@ import WeeklyInputs from './WeeklyInputs';
 // both in react-hook-form forms as well as mantine forms. If/when
 // we move away from one of them, this should get simplified.
 export const CronInternalInputs: FC<
-    {
-        disabled: boolean | undefined;
-        error?: string;
-        errors?: {
-            [x: string]: any;
-        };
-        onBlur?: () => void;
-    } & Omit<ControllerRenderProps<FieldValues, string>, 'ref' | 'onBlur'>
-> = ({ value, disabled, onChange, name, error, errors }) => {
+    PropsWithChildren<
+        {
+            disabled: boolean | undefined;
+            error?: string;
+            errors?: {
+                [x: string]: any;
+            };
+            onBlur?: () => void;
+        } & Omit<ControllerRenderProps<FieldValues, string>, 'ref' | 'onBlur'>
+    >
+> = ({ value, disabled, onChange, name, error, errors, children }) => {
     const [frequency, setFrequency] = useState<Frequency>(
         mapCronExpressionToFrequency(value),
     );
@@ -51,7 +59,7 @@ export const CronInternalInputs: FC<
     );
 
     return (
-        <Group spacing="sm">
+        <Group spacing="sm" align="flex-start">
             <FrequencySelect
                 value={frequency}
                 disabled={disabled}
@@ -78,6 +86,7 @@ export const CronInternalInputs: FC<
                     error={error}
                 />
             )}
+            {children}
         </Group>
     );
 };

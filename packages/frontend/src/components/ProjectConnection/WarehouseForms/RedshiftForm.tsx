@@ -1,4 +1,4 @@
-import { WarehouseTypes } from '@lightdash/common';
+import { FeatureFlags, WarehouseTypes } from '@lightdash/common';
 import {
     ActionIcon,
     Anchor,
@@ -14,14 +14,16 @@ import {
     Tooltip,
 } from '@mantine/core';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 import { useToggle } from 'react-use';
+import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
 import { hasNoWhiteSpaces } from '../../../utils/fieldValidators';
 import MantineIcon from '../../common/MantineIcon';
+import BooleanSwitch from '../../ReactHookForm/BooleanSwitch';
 import FormSection from '../../ReactHookForm/FormSection';
 import FormCollapseButton from '../FormCollapseButton';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 import StartOfWeekSelect from './Inputs/StartOfWeekSelect';
 import { useCreateSshKeyPair } from './sshHooks';
 
@@ -72,6 +74,9 @@ const RedshiftForm: FC<{
             setValue('warehouse.sshTunnelPublicKey', data.publicKey);
         },
     });
+    const isPassthroughLoginFeatureEnabled = useFeatureFlagEnabled(
+        FeatureFlags.PassthroughLogin,
+    );
     return (
         <>
             <Stack style={{ marginTop: '8px' }}>
@@ -128,6 +133,14 @@ const RedshiftForm: FC<{
                 />
                 <FormSection isOpen={isOpen} name="advanced">
                     <Stack style={{ marginTop: '8px' }}>
+                        {isPassthroughLoginFeatureEnabled && (
+                            <BooleanSwitch
+                                name="warehouse.requireUserCredentials"
+                                label="Require users to provide their own credentials"
+                                defaultValue={false}
+                                disabled={disabled}
+                            />
+                        )}
                         <Controller
                             name="warehouse.port"
                             defaultValue={5439}
@@ -230,7 +243,29 @@ const RedshiftForm: FC<{
                                 </Switch.Group>
                             )}
                         />
+
                         <StartOfWeekSelect disabled={disabled} />
+
+                        <Controller
+                            name="warehouse.timeoutSeconds"
+                            defaultValue={300}
+                            render={({ field }) => (
+                                <NumberInput
+                                    {...field}
+                                    label="Timeout in seconds"
+                                    description={
+                                        <p>
+                                            If a query takes longer than this
+                                            timeout to complete, then the query
+                                            will be cancelled.
+                                        </p>
+                                    }
+                                    required
+                                    disabled={disabled}
+                                />
+                            )}
+                        />
+
                         <Controller
                             name="warehouse.useSshTunnel"
                             render={({ field }) => (

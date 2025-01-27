@@ -1,7 +1,8 @@
-import { AbilityBuilder } from '@casl/ability';
-import { MemberAbility } from '../authorization/types';
-import { OpenIdIdentityIssuerType } from './openIdIdentity';
-import { OrganizationMemberRole } from './organizationMemberProfile';
+import { type AbilityBuilder } from '@casl/ability';
+import { type MemberAbility } from '../authorization/types';
+import { type AnyType } from './any';
+import { type OpenIdIdentityIssuerType } from './openIdIdentity';
+import { type OrganizationMemberRole } from './organizationMemberProfile';
 
 export interface LightdashUser {
     userUuid: string;
@@ -15,7 +16,16 @@ export interface LightdashUser {
     isMarketingOptedIn: boolean;
     isSetupComplete: boolean;
     role?: OrganizationMemberRole;
+    createdAt: Date;
+    updatedAt: Date;
+    /**
+     * Whether the user can login
+     */
     isActive: boolean;
+    /**
+     * Whether the user doesn't have an authentication method (password or openId)
+     */
+    isPending?: boolean;
 }
 
 export type LightdashUserWithOrg = Required<LightdashUser>;
@@ -42,7 +52,7 @@ export interface UpdatedByUser {
     firstName: string;
     lastName: string;
 }
-export const isSessionUser = (user: any): user is SessionUser =>
+export const isSessionUser = (user: AnyType): user is SessionUser =>
     typeof user === 'object' &&
     user !== null &&
     user.userUuid &&
@@ -57,10 +67,11 @@ export interface OpenIdUser {
         email: string;
         firstName: string | undefined;
         lastName: string | undefined;
+        groups?: string[] | undefined;
     };
 }
 
-export const isOpenIdUser = (user: any): user is OpenIdUser =>
+export const isOpenIdUser = (user: AnyType): user is OpenIdUser =>
     typeof user === 'object' &&
     user !== null &&
     user.userUuid === undefined &&
@@ -95,3 +106,31 @@ export type ApiRegisterUserResponse = {
     status: 'ok';
     results: LightdashUser;
 };
+
+export enum LocalIssuerTypes {
+    EMAIL = 'email',
+    API_TOKEN = 'apiToken',
+}
+
+export type LoginOptionTypes = OpenIdIdentityIssuerType | LocalIssuerTypes;
+
+export type LoginOptions = {
+    showOptions: LoginOptionTypes[];
+    forceRedirect?: boolean;
+    redirectUri?: string;
+};
+
+export type ApiGetLoginOptionsResponse = {
+    status: 'ok';
+    results: LoginOptions;
+};
+
+export type IntrinsicUserAttributes = {
+    email?: string;
+};
+
+export const getIntrinsicUserAttributes = (
+    user: Pick<LightdashUser, 'email'>,
+): IntrinsicUserAttributes => ({
+    email: user.email,
+});

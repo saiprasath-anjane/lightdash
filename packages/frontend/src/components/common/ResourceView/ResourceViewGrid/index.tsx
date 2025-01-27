@@ -1,26 +1,28 @@
 import {
+    DragDropContext,
+    Draggable,
+    Droppable,
+    type DropResult,
+} from '@hello-pangea/dnd';
+import {
     assertUnreachable,
-    ResourceViewItem,
     ResourceViewItemType,
+    type ResourceViewItem,
 } from '@lightdash/common';
 import { Anchor, Box, SimpleGrid, Stack, Text } from '@mantine/core';
 import { mergeRefs, useHover } from '@mantine/hooks';
 import { IconGripVertical } from '@tabler/icons-react';
-import produce from 'immer';
+import { produce } from 'immer';
 import orderBy from 'lodash/orderBy';
-import { FC, useMemo } from 'react';
-import {
-    DragDropContext,
-    Draggable,
-    Droppable,
-    DropResult,
-} from 'react-beautiful-dnd';
-import { Link, useParams } from 'react-router-dom';
-import { ResourceViewCommonProps } from '..';
-import { usePinnedItemsContext } from '../../../../providers/PinnedItemsProvider';
+import { useMemo, type FC } from 'react';
+import { Link, useParams } from 'react-router';
+import usePinnedItemsContext from '../../../../providers/PinnedItems/usePinnedItemsContext';
 import MantineIcon from '../../MantineIcon';
-import { ResourceViewItemActionState } from '../ResourceActionHandlers';
 import { getResourceName, getResourceUrl } from '../resourceUtils';
+import {
+    type ResourceViewCommonProps,
+    type ResourceViewItemActionState,
+} from '../types';
 import ResourceViewGridChartItem from './ResourceViewGridChartItem';
 import ResourceViewGridDashboardItem from './ResourceViewGridDashboardItem';
 import ResourceViewGridSpaceItem from './ResourceViewGridSpaceItem';
@@ -37,6 +39,7 @@ type ResourceViewGridProps = ResourceViewGridCommonProps &
 
 type DraggableItemProps = Pick<ResourceViewGridProps, 'onAction'> & {
     item: ResourceViewItem;
+    allowDelete?: boolean;
     index: number;
     onAction: (newAction: ResourceViewItemActionState) => void;
     projectUuid: string;
@@ -45,6 +48,7 @@ type DraggableItemProps = Pick<ResourceViewGridProps, 'onAction'> & {
 
 const DraggableItem: FC<DraggableItemProps> = ({
     item,
+    allowDelete,
     index,
     onAction,
     projectUuid,
@@ -94,18 +98,21 @@ const DraggableItem: FC<DraggableItemProps> = ({
                         {item.type === ResourceViewItemType.SPACE ? (
                             <ResourceViewGridSpaceItem
                                 item={item}
+                                allowDelete={allowDelete}
                                 onAction={onAction}
                                 dragIcon={DragIcon}
                             />
                         ) : item.type === ResourceViewItemType.DASHBOARD ? (
                             <ResourceViewGridDashboardItem
                                 item={item}
+                                allowDelete={allowDelete}
                                 onAction={onAction}
                                 dragIcon={DragIcon}
                             />
                         ) : item.type === ResourceViewItemType.CHART ? (
                             <ResourceViewGridChartItem
                                 item={item}
+                                allowDelete={allowDelete}
                                 onAction={onAction}
                                 dragIcon={DragIcon}
                             />
@@ -134,7 +141,7 @@ const ResourceViewGrid: FC<ResourceViewGridProps> = ({
     onAction,
     hasReorder = false,
 }) => {
-    const { reorderItems } = usePinnedItemsContext();
+    const { reorderItems, allowDelete } = usePinnedItemsContext();
     const { projectUuid } = useParams<{ projectUuid: string }>();
 
     const groupedItems = useMemo(() => {
@@ -192,6 +199,10 @@ const ResourceViewGrid: FC<ResourceViewGridProps> = ({
         reorderItems(pinnedItemsOrder(newDraggableItems));
     };
 
+    if (!projectUuid) {
+        return null;
+    }
+
     return (
         <Stack spacing="xl" p="lg">
             {groupedItems.map((group) => (
@@ -226,6 +237,7 @@ const ResourceViewGrid: FC<ResourceViewGridProps> = ({
                                                 item.type + '-' + item.data.uuid
                                             }
                                             item={item}
+                                            allowDelete={allowDelete}
                                             index={index}
                                             onAction={onAction}
                                             projectUuid={projectUuid}

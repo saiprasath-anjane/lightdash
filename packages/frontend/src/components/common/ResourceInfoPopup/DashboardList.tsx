@@ -1,5 +1,5 @@
-import { Anchor, List, Loader, Text } from '@mantine/core';
-import { FC } from 'react';
+import { Anchor, Box, List, Loader, Text } from '@mantine/core';
+import { type FC } from 'react';
 import { useDashboardsContainingChart } from '../../../hooks/dashboard/useDashboards';
 
 type Props = {
@@ -13,7 +13,7 @@ export const DashboardList: FC<Props> = ({ resourceItemId, projectUuid }) => {
         resourceItemId,
     );
     return (
-        <>
+        <Box>
             {relatedDashboards ? (
                 <Text fw={600} fz="xs" color="gray.6">
                     Used in {relatedDashboards?.length ?? 0} dashboard
@@ -32,7 +32,9 @@ export const DashboardList: FC<Props> = ({ resourceItemId, projectUuid }) => {
                             <Anchor
                                 href={`${window.location.origin}/projects/${projectUuid}/dashboards/${uuid}/view/`}
                                 target="_blank"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(
+                                    e: React.MouseEvent<HTMLAnchorElement>,
+                                ) => e.stopPropagation()}
                             >
                                 {name}
                             </Anchor>
@@ -40,6 +42,6 @@ export const DashboardList: FC<Props> = ({ resourceItemId, projectUuid }) => {
                     ))}
                 </List>
             )}
-        </>
+        </Box>
     );
 };

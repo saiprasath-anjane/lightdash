@@ -10,6 +10,7 @@ import {
 import inquirer from 'inquirer';
 import path from 'path';
 import { URL } from 'url';
+import { v4 as uuidv4 } from 'uuid';
 import { LightdashAnalytics } from '../analytics/analytics';
 import { getConfig, setProject } from '../config';
 import { getDbtContext } from '../dbt/context';
@@ -19,6 +20,7 @@ import { compile } from './compile';
 import { createProject } from './createProject';
 import { checkLightdashVersion, lightdashApi } from './dbt/apiClient';
 import { DbtCompileOptions } from './dbt/compile';
+import { getDbtVersion } from './dbt/getDbtVersion';
 
 type DeployHandlerOptions = DbtCompileOptions & {
     projectDir: string;
@@ -39,6 +41,11 @@ export const deploy = async (
     explores: (Explore | ExploreError)[],
     options: DeployArgs,
 ): Promise<void> => {
+    if (explores.length === 0) {
+        GlobalState.log(styles.warning('No explores found'));
+        process.exit(1);
+    }
+
     const errors = explores.filter((e) => isExploreError(e)).length;
     if (errors > 0) {
         if (options.ignoreErrors) {
@@ -57,7 +64,7 @@ export const deploy = async (
         }
     }
 
-    await lightdashApi<undefined>({
+    await lightdashApi<null>({
         method: 'PUT',
         url: `/api/v1/projects/${options.projectUuid}/explores`,
         body: JSON.stringify(explores),
@@ -71,6 +78,7 @@ export const deploy = async (
 };
 
 const createNewProject = async (
+    executionId: string,
     options: DeployHandlerOptions,
 ): Promise<Project | undefined> => {
     console.error('');
@@ -100,6 +108,8 @@ const createNewProject = async (
         projectName = options.create;
     }
 
+    projectName = projectName.trim();
+
     // Create the project
     console.error('');
     const spinner = GlobalState.startSpinner(
@@ -108,16 +118,20 @@ const createNewProject = async (
     await LightdashAnalytics.track({
         event: 'create.started',
         properties: {
+            executionId,
             projectName,
             isDefaultName: dbtName === projectName,
         },
     });
     try {
-        const project = await createProject({
+        const results = await createProject({
             ...options,
             name: projectName,
             type: ProjectType.DEFAULT,
         });
+
+        const project = results?.project;
+
         if (!project) {
             spinner.fail('Cancel preview environment');
             return undefined;
@@ -127,6 +141,7 @@ const createNewProject = async (
         await LightdashAnalytics.track({
             event: 'create.completed',
             properties: {
+                executionId,
                 projectId: project.projectUuid,
                 projectName,
             },
@@ -137,6 +152,7 @@ const createNewProject = async (
         await LightdashAnalytics.track({
             event: 'create.error',
             properties: {
+                executionId,
                 error: `Error creating developer preview ${e}`,
             },
         });
@@ -148,14 +164,16 @@ const createNewProject = async (
 
 export const deployHandler = async (options: DeployHandlerOptions) => {
     GlobalState.setVerbose(options.verbose);
+    const dbtVersion = await getDbtVersion();
     await checkLightdashVersion();
+    const executionId = uuidv4();
     const explores = await compile(options);
 
     const config = await getConfig();
     let projectUuid: string;
 
     if (options.create !== undefined) {
-        const project = await createNewProject(options);
+        const project = await createNewProject(executionId, options);
         if (!project) {
             console.error(
                 "To preview your project, you'll need to manually enter your warehouse connection details.",
@@ -183,11 +201,17 @@ export const deployHandler = async (options: DeployHandlerOptions) => {
 
     await deploy(explores, { ...options, projectUuid });
 
-    const displayUrl = options.create
-        ? `${config.context?.serverUrl}/createProject/cli?projectUuid=${projectUuid}`
-        : `${config.context?.serverUrl}/projects/${projectUuid}/home`;
-
-    console.error(`${styles.bold('Successfully deployed project:')}`);
+    const serverUrl = config.context?.serverUrl?.replace(/\/$/, '');
+    let displayUrl = options.create
+        ? `${serverUrl}/createProject/cli?projectUuid=${projectUuid}`
+        : `${serverUrl}/projects/${projectUuid}/home`;
+    let successMessage = 'Successfully deployed project:';
+    if (dbtVersion.isDbtCloudCLI && options.create) {
+        successMessage =
+            'Successfully deployed project! Complete the setup by adding warehouse connection details here:';
+        displayUrl = `${serverUrl}/generalSettings/projectManagement/${projectUuid}/settings`;
+    }
+    console.error(`${styles.bold(successMessage)}`);
     console.error('');
     console.error(`      ${styles.bold(`⚡️ ${displayUrl}`)}`);
     console.error('');

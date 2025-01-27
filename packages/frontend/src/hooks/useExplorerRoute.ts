@@ -1,27 +1,87 @@
 import {
     ChartType,
-    CreateSavedChartVersion,
+    CustomDimensionType,
     DateGranularity,
-    MetricQuery,
+    getItemId,
+    isCartesianChartConfig,
+    type ChartConfig,
+    type CreateSavedChartVersion,
+    type CustomBinDimension,
+    type CustomDimension,
+    type Metric,
+    type MetricQuery,
 } from '@lightdash/common';
 import { useEffect, useMemo } from 'react';
-import { useHistory, useLocation, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import {
-    ExplorerReduceState,
     ExplorerSection,
-    useExplorerContext,
-} from '../providers/ExplorerProvider';
+    type ExplorerReduceState,
+} from '../providers/Explorer/types';
+import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import useToaster from './toaster/useToaster';
+export const DEFAULT_EMPTY_EXPLORE_CONFIG: CreateSavedChartVersion = {
+    tableName: '',
+    metricQuery: {
+        exploreName: '',
+        dimensions: [],
+        metrics: [],
+        tableCalculations: [],
+        filters: {},
+        sorts: [],
+        limit: 500,
+    },
+    chartConfig: {
+        type: ChartType.CARTESIAN,
+        config: {
+            layout: {},
+            eChartsConfig: {},
+        },
+    },
+    tableConfig: {
+        columnOrder: [],
+    },
+};
 
 export const getExplorerUrlFromCreateSavedChartVersion = (
-    projectUuid: string,
+    projectUuid: string | undefined,
     createSavedChart: CreateSavedChartVersion,
+    // Pass true to preserve long url. This is sometimes desireable when we want
+    // all of the information in the URL, but don't use it for navigation.
+    // For example, the explore from here button uses the entire URL to create
+    // shareable, shortened links.
+    preserveLongUrl?: boolean,
 ): { pathname: string; search: string } => {
+    if (!projectUuid) {
+        return { pathname: '', search: '' };
+    }
     const newParams = new URLSearchParams();
-    newParams.set(
-        'create_saved_chart_version',
-        JSON.stringify(createSavedChart),
-    );
+
+    let stringifiedChart = JSON.stringify(createSavedChart);
+    const stringifiedChartSize = stringifiedChart.length;
+    if (
+        stringifiedChartSize > 3000 &&
+        !preserveLongUrl &&
+        isCartesianChartConfig(createSavedChart.chartConfig.config)
+    ) {
+        console.warn(
+            `Chart config is too large to store in url "${stringifiedChartSize}", removing series to reduce size`,
+        );
+        const reducedCreateSavedChart = {
+            ...createSavedChart,
+            chartConfig: {
+                ...createSavedChart.chartConfig,
+                config: {
+                    ...createSavedChart.chartConfig.config,
+                    eChartsConfig: {},
+                },
+            },
+        };
+        stringifiedChart = JSON.stringify(reducedCreateSavedChart);
+        console.info(
+            `Reduced chart config size from "${stringifiedChartSize}" to "${stringifiedChart.length}"`,
+        );
+    }
+    newParams.set('create_saved_chart_version', stringifiedChart);
 
     return {
         pathname: `/projects/${projectUuid}/tables/${createSavedChart.tableName}`,
@@ -66,13 +126,26 @@ export const parseExplorerSearchParams = (
                 exploreName:
                     parsedValue.metricQuery.exploreName ||
                     parsedValue.tableName,
+                customDimensions:
+                    parsedValue.metricQuery.customDimensions?.map<CustomDimension>(
+                        (customDimension) => {
+                            if (customDimension.type === undefined) {
+                                return {
+                                    ...(customDimension as CustomBinDimension),
+                                    type: CustomDimensionType.BIN, // add type for backwards compatibility
+                                };
+                            } else {
+                                return customDimension;
+                            }
+                        },
+                    ),
             },
         };
     }
 };
 
 export const useExplorerRoute = () => {
-    const history = useHistory();
+    const navigate = useNavigate();
     const pathParams = useParams<{
         projectUuid: string;
         tableId: string | undefined;
@@ -82,8 +155,8 @@ export const useExplorerRoute = () => {
     const unsavedChartVersion = useExplorerContext(
         (context) => context.state.unsavedChartVersion,
     );
-    const queryResultsData = useExplorerContext(
-        (context) => context.queryResults.data,
+    const metricQuery = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.metricQuery,
     );
     const clearExplore = useExplorerContext(
         (context) => context.actions.clearExplore,
@@ -94,20 +167,21 @@ export const useExplorerRoute = () => {
 
     // Update url params based on pristine state
     useEffect(() => {
-        if (queryResultsData?.metricQuery) {
-            history.replace(
+        if (metricQuery && unsavedChartVersion.tableName) {
+            void navigate(
                 getExplorerUrlFromCreateSavedChartVersion(
                     pathParams.projectUuid,
                     {
                         ...unsavedChartVersion,
-                        metricQuery: queryResultsData.metricQuery,
+                        metricQuery,
                     },
                 ),
+                { replace: true },
             );
         }
     }, [
-        queryResultsData,
-        history,
+        metricQuery,
+        navigate,
         pathParams.projectUuid,
         unsavedChartVersion,
         dateZoom,
@@ -132,28 +206,31 @@ export const useExplorerUrlState = (): ExplorerReduceState | undefined => {
 
     return useMemo(() => {
         if (pathParams.tableId) {
-            const unsavedChartVersion = parseExplorerSearchParams(search) || {
-                tableName: '',
-                metricQuery: {
-                    exploreName: '',
-                    dimensions: [],
-                    metrics: [],
-                    filters: {},
-                    sorts: [],
-                    limit: 500,
-                    tableCalculations: [],
-                    additionalMetrics: [],
-                },
-                pivotConfig: undefined,
-                tableConfig: {
-                    columnOrder: [],
-                },
-                chartConfig: {
-                    type: ChartType.CARTESIAN,
-                    config: { layout: {}, eChartsConfig: {} },
-                },
-            };
             try {
+                const unsavedChartVersion = parseExplorerSearchParams(
+                    search,
+                ) || {
+                    tableName: '',
+                    metricQuery: {
+                        exploreName: '',
+                        dimensions: [],
+                        metrics: [],
+                        filters: {},
+                        sorts: [],
+                        limit: 500,
+                        tableCalculations: [],
+                        additionalMetrics: [],
+                    },
+                    pivotConfig: undefined,
+                    tableConfig: {
+                        columnOrder: [],
+                    },
+                    chartConfig: {
+                        type: ChartType.CARTESIAN,
+                        config: { layout: {}, eChartsConfig: {} },
+                    },
+                };
+
                 return {
                     shouldFetchResults: true,
                     expandedSections: unsavedChartVersion
@@ -164,6 +241,9 @@ export const useExplorerUrlState = (): ExplorerReduceState | undefined => {
                         : [ExplorerSection.RESULTS],
                     unsavedChartVersion,
                     modals: {
+                        format: {
+                            isOpen: false,
+                        },
                         additionalMetric: {
                             isOpen: false,
                         },
@@ -173,8 +253,38 @@ export const useExplorerUrlState = (): ExplorerReduceState | undefined => {
                     },
                 };
             } catch (e: any) {
-                showToastError({ title: 'Error parsing url', subtitle: e });
+                const errorMessage = e.message ? ` Error: "${e.message}"` : '';
+                showToastError({
+                    title: 'Error parsing url',
+                    subtitle: `URL is invalid or incomplete.${errorMessage}`,
+                });
             }
         }
     }, [pathParams, search, showToastError]);
+};
+
+export const createMetricPreviewUnsavedChartVersion = (
+    metric: Pick<Metric, 'name' | 'table'>,
+): CreateSavedChartVersion => {
+    let chartConfig: ChartConfig = {
+        type: ChartType.BIG_NUMBER,
+        config: {},
+    };
+
+    return {
+        ...DEFAULT_EMPTY_EXPLORE_CONFIG,
+        tableName: metric.table,
+        chartConfig,
+        metricQuery: {
+            ...DEFAULT_EMPTY_EXPLORE_CONFIG.metricQuery,
+            exploreName: metric.table,
+            dimensions: [],
+            metrics: [
+                getItemId({
+                    name: metric.name,
+                    table: metric.table,
+                }),
+            ],
+        },
+    };
 };

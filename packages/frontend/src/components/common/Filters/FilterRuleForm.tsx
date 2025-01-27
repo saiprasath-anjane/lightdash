@@ -1,19 +1,21 @@
 import {
     createFilterRuleFromField,
-    fieldId as getFieldId,
-    FilterableField,
-    FilterRule,
     FilterType,
     getFilterRuleWithDefaultValue,
     getFilterTypeFromItem,
+    getItemId,
+    isDateItem,
+    type FilterableField,
+    type FilterRule,
 } from '@lightdash/common';
-import { ActionIcon, Box, Menu, Select, Text } from '@mantine/core';
+import { ActionIcon, Box, Group, Menu, Select, Tooltip } from '@mantine/core';
 import { IconDots, IconX } from '@tabler/icons-react';
-import { FC, useCallback, useMemo } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import FieldSelect from '../FieldSelect';
 import MantineIcon from '../MantineIcon';
-import { FilterInputComponent, getFilterOperatorOptions } from './FilterInputs';
-import { useFiltersContext } from './FiltersProvider';
+import FilterInputComponent from './FilterInputs';
+import { getFilterOperatorOptions } from './FilterInputs/utils';
+import useFiltersContext from './useFiltersContext';
 
 type Props = {
     fields: FilterableField[];
@@ -32,10 +34,10 @@ const FilterRuleForm: FC<Props> = ({
     onDelete,
     onConvertToGroup,
 }) => {
-    const { popoverProps } = useFiltersContext();
+    const { popoverProps, baseTable } = useFiltersContext();
     const activeField = useMemo(() => {
         return fields.find(
-            (field) => getFieldId(field) === filterRule.target.fieldId,
+            (field) => getItemId(field) === filterRule.target.fieldId,
         );
     }, [fields, filterRule.target.fieldId]);
 
@@ -52,16 +54,27 @@ const FilterRuleForm: FC<Props> = ({
     const onFieldChange = useCallback(
         (fieldId: string) => {
             const selectedField = fields.find(
-                (field) => getFieldId(field) === fieldId,
+                (field) => getItemId(field) === fieldId,
             );
             if (selectedField && activeField) {
                 if (selectedField.type === activeField.type) {
-                    onChange({
+                    const newFilterRuleBase = {
                         ...filterRule,
                         target: {
                             fieldId,
                         },
-                    });
+                    };
+
+                    const newFilterRule = isDateItem(selectedField)
+                        ? // If the field is the same type but different field, we need to update the filter rule with the new time frames
+                          getFilterRuleWithDefaultValue(
+                              selectedField,
+                              newFilterRuleBase,
+                              filterRule.values,
+                          )
+                        : newFilterRuleBase;
+
+                    onChange(newFilterRule);
                 } else {
                     onChange(createFilterRuleFromField(selectedField));
                 }
@@ -69,83 +82,87 @@ const FilterRuleForm: FC<Props> = ({
         },
         [activeField, fields, filterRule, onChange],
     );
+    const isRequired = filterRule.required;
+    const isRequiredLabel = isRequired
+        ? "This filter is a required filter.\n It can't be deleted, but the value can be changed."
+        : '';
+
+    if (!activeField) {
+        return null;
+    }
 
     return (
-        <div
-            style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 10,
-                flex: 1,
-            }}
-        >
-            {activeField ? (
-                <>
-                    <FieldSelect
-                        size="xs"
-                        disabled={!isEditMode}
-                        withinPortal={popoverProps?.withinPortal}
-                        onDropdownOpen={popoverProps?.onOpen}
-                        onDropdownClose={popoverProps?.onClose}
-                        hasGrouping
-                        item={activeField}
-                        items={fields}
-                        onChange={(field) => {
-                            if (!field) return;
-                            onFieldChange(getFieldId(field));
-                        }}
-                    />
+        <Group noWrap align="start" spacing="xs">
+            <FieldSelect
+                size="xs"
+                disabled={!isEditMode}
+                withinPortal={popoverProps?.withinPortal}
+                onDropdownOpen={popoverProps?.onOpen}
+                onDropdownClose={popoverProps?.onClose}
+                hasGrouping
+                item={activeField}
+                items={fields}
+                onChange={(field) => {
+                    if (!field) return;
+                    onFieldChange(getItemId(field));
+                }}
+                baseTable={baseTable}
+            />
+            <Select
+                size="xs"
+                w="150px"
+                sx={{ flexShrink: 0 }}
+                withinPortal={popoverProps?.withinPortal}
+                onDropdownOpen={popoverProps?.onOpen}
+                onDropdownClose={popoverProps?.onClose}
+                disabled={!isEditMode}
+                value={filterRule.operator}
+                data={filterOperatorOptions}
+                onChange={(value) => {
+                    if (!value) return;
 
-                    <Select
-                        size="xs"
-                        w="150px"
-                        sx={{ flexShrink: 0 }}
-                        withinPortal={popoverProps?.withinPortal}
-                        onDropdownOpen={popoverProps?.onOpen}
-                        onDropdownClose={popoverProps?.onClose}
-                        disabled={!isEditMode}
-                        value={filterRule.operator}
-                        data={filterOperatorOptions}
-                        onChange={(value) => {
-                            if (!value) return;
+                    onChange(
+                        getFilterRuleWithDefaultValue(
+                            activeField,
+                            {
+                                ...filterRule,
+                                operator: value as FilterRule['operator'],
+                            },
+                            (filterRule.values?.length || 0) > 0
+                                ? filterRule.values
+                                : [1],
+                        ),
+                    );
+                }}
+            />
 
-                            onChange(
-                                getFilterRuleWithDefaultValue(
-                                    activeField,
-                                    {
-                                        ...filterRule,
-                                        operator:
-                                            value as FilterRule['operator'],
-                                    },
-                                    (filterRule.values?.length || 0) > 0
-                                        ? filterRule.values
-                                        : [1],
-                                ),
-                            );
-                        }}
-                    />
-
-                    <FilterInputComponent
-                        filterType={filterType}
-                        field={activeField}
-                        rule={filterRule}
-                        onChange={onChange}
-                        disabled={!isEditMode}
-                        popoverProps={popoverProps}
-                    />
-                </>
-            ) : (
-                <Text color="dimmed">
-                    Tried to reference field with unknown id:{' '}
-                    {filterRule.target.fieldId}
-                </Text>
-            )}
+            <FilterInputComponent
+                filterType={filterType}
+                field={activeField}
+                rule={filterRule}
+                onChange={onChange}
+                disabled={!isEditMode}
+                popoverProps={popoverProps}
+            />
 
             {isEditMode &&
                 (!onConvertToGroup ? (
-                    <ActionIcon onClick={onDelete}>
-                        <MantineIcon icon={IconX} size="lg" />
-                    </ActionIcon>
+                    <Tooltip
+                        label={isRequiredLabel}
+                        disabled={!isRequired}
+                        withinPortal
+                        variant="xs"
+                        multiline
+                    >
+                        <span>
+                            <ActionIcon
+                                onClick={onDelete}
+                                disabled={isRequired}
+                            >
+                                <MantineIcon icon={IconX} size="sm" />
+                            </ActionIcon>
+                        </span>
+                    </Tooltip>
                 ) : (
                     <Menu
                         position="bottom-end"
@@ -166,13 +183,27 @@ const FilterRuleForm: FC<Props> = ({
                             <Menu.Item onClick={onConvertToGroup}>
                                 Convert to group
                             </Menu.Item>
-                            <Menu.Item color="red" onClick={onDelete}>
-                                Remove
-                            </Menu.Item>
+                            <Tooltip
+                                label={isRequiredLabel}
+                                disabled={!isRequired}
+                                withinPortal
+                                variant="xs"
+                                multiline
+                            >
+                                <span>
+                                    <Menu.Item
+                                        color="red"
+                                        disabled={isRequired}
+                                        onClick={onDelete}
+                                    >
+                                        Remove
+                                    </Menu.Item>
+                                </span>
+                            </Tooltip>
                         </Menu.Dropdown>
                     </Menu>
                 ))}
-        </div>
+        </Group>
     );
 };
 

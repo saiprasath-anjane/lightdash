@@ -1,5 +1,5 @@
-import { ApiError, Space } from '@lightdash/common';
-import { useMutation, useQueryClient } from 'react-query';
+import { type ApiError, type Space } from '@lightdash/common';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { lightdashApi } from '../../api';
 import useToaster from '../toaster/useToaster';
 
@@ -10,15 +10,18 @@ const updateSpacePinning = async (projectUuid: string, spaceUuid: string) =>
         body: undefined,
     });
 
-export const useSpacePinningMutation = (projectUuid: string) => {
+export const useSpacePinningMutation = (projectUuid: string | undefined) => {
     const queryClient = useQueryClient();
-    const { showToastError, showToastSuccess } = useToaster();
+    const { showToastApiError, showToastSuccess } = useToaster();
     return useMutation<Space, ApiError, string>(
-        (spaceUuid) => updateSpacePinning(projectUuid, spaceUuid),
+        (spaceUuid) =>
+            projectUuid
+                ? updateSpacePinning(projectUuid, spaceUuid)
+                : Promise.reject(),
         {
             mutationKey: ['space_pinning_update'],
             onSuccess: async (space) => {
-                await queryClient.invalidateQueries('pinned_items');
+                await queryClient.invalidateQueries(['pinned_items']);
                 await queryClient.invalidateQueries([
                     'spaces',
                     space.projectUuid,
@@ -33,9 +36,9 @@ export const useSpacePinningMutation = (projectUuid: string) => {
                     space.projectUuid,
                     space.uuid,
                 ]);
-                await queryClient.invalidateQueries(
+                await queryClient.invalidateQueries([
                     'most-popular-and-recently-updated',
-                );
+                ]);
 
                 if (space.pinnedListUuid) {
                     showToastSuccess({
@@ -47,10 +50,10 @@ export const useSpacePinningMutation = (projectUuid: string) => {
                     });
                 }
             },
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: 'Failed to pin space',
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },

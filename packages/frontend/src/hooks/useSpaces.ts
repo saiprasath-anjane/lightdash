@@ -1,37 +1,19 @@
 import {
-    ApiError,
-    CreateSpace,
-    Space,
-    SpaceSummary,
-    UpdateSpace,
+    type ApiError,
+    type CreateSpace,
+    type Space,
+    type SpaceSummary,
+    type UpdateSpace,
 } from '@lightdash/common';
 import {
     useMutation,
     useQuery,
     useQueryClient,
-    UseQueryOptions,
-} from 'react-query';
+    type UseQueryOptions,
+} from '@tanstack/react-query';
 import { lightdashApi } from '../api';
 import useToaster from './toaster/useToaster';
 import useUser from './user/useUser';
-
-const getSpaces = async (projectUuid: string) =>
-    lightdashApi<Space[]>({
-        url: `/projects/${projectUuid}/spaces-and-content`,
-        method: 'GET',
-        body: undefined,
-    });
-
-const useSpaces = (
-    projectUuid: string,
-    queryOptions?: UseQueryOptions<Space[], ApiError>,
-) => {
-    return useQuery<Space[], ApiError>(
-        ['spaces', projectUuid],
-        () => getSpaces(projectUuid),
-        { ...queryOptions },
-    );
-};
 
 const getSpaceSummaries = async (projectUuid: string) => {
     return lightdashApi<SpaceSummary[]>({
@@ -42,14 +24,14 @@ const getSpaceSummaries = async (projectUuid: string) => {
 };
 
 export const useSpaceSummaries = (
-    projectUuid: string,
+    projectUuid?: string,
     includePrivateSpaces: boolean = false,
     queryOptions?: UseQueryOptions<SpaceSummary[], ApiError>,
 ) => {
     const { data: user } = useUser(true);
     return useQuery<SpaceSummary[], ApiError>(
         ['projects', projectUuid, 'spaces'],
-        () => getSpaceSummaries(projectUuid),
+        () => getSpaceSummaries(projectUuid!),
         {
             select: (data) =>
                 // only get spaces that the user has direct access to
@@ -60,17 +42,10 @@ export const useSpaceSummaries = (
                               (!!user && space.access.includes(user.userUuid)),
                       )
                     : data,
+            enabled: !!projectUuid,
             ...queryOptions,
         },
     );
-};
-
-// DEPRECATED: masks usage of `/spaces-and-content` endpoint
-// Use `useSpaceSummaries` where possible
-export const useSavedCharts = (projectUuid: string) => {
-    const spaces = useSpaces(projectUuid);
-    const allCharts = spaces.data?.flatMap((space) => space.queries);
-    return { ...spaces, data: allCharts };
 };
 
 const getSpace = async (projectUuid: string, spaceUuid: string) =>
@@ -81,28 +56,29 @@ const getSpace = async (projectUuid: string, spaceUuid: string) =>
     });
 
 export const useSpace = (
-    projectUuid: string,
-    spaceUuid: string,
+    projectUuid: string | undefined,
+    spaceUuid: string | undefined,
     useQueryOptions?: UseQueryOptions<Space, ApiError>,
 ) =>
     useQuery<Space, ApiError>({
         queryKey: ['space', projectUuid, spaceUuid],
-        queryFn: () => getSpace(projectUuid, spaceUuid),
+        queryFn: () => getSpace(projectUuid!, spaceUuid!),
+        enabled: !!projectUuid && !!spaceUuid,
         ...useQueryOptions,
     });
 
 const deleteQuery = async (projectUuid: string, spaceUuid: string) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/projects/${projectUuid}/spaces/${spaceUuid}`,
         method: 'DELETE',
         body: undefined,
     });
 
 export const useSpaceDeleteMutation = (projectUuid: string) => {
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
 
-    return useMutation<undefined, ApiError, string>(
+    return useMutation<null, ApiError, string>(
         (spaceUuid) => deleteQuery(projectUuid, spaceUuid),
         {
             mutationKey: ['space_delete', projectUuid],
@@ -112,15 +88,15 @@ export const useSpaceDeleteMutation = (projectUuid: string) => {
                     projectUuid,
                     'spaces',
                 ]);
-                await queryClient.invalidateQueries('pinned_items');
+                await queryClient.invalidateQueries(['pinned_items']);
                 showToastSuccess({
                     title: `Success! Space was deleted.`,
                 });
             },
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to delete space`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
@@ -138,12 +114,18 @@ const updateSpace = async (
         body: JSON.stringify(data),
     });
 
-export const useUpdateMutation = (projectUuid: string, spaceUuid: string) => {
-    const { showToastSuccess, showToastError } = useToaster();
+export const useUpdateMutation = (
+    projectUuid: string,
+    spaceUuid: string | undefined,
+) => {
+    const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
 
     return useMutation<Space, ApiError, UpdateSpace>(
-        (data) => updateSpace(projectUuid, spaceUuid, data),
+        (data) =>
+            projectUuid && spaceUuid
+                ? updateSpace(projectUuid, spaceUuid, data)
+                : Promise.reject(),
         {
             mutationKey: ['space_update', projectUuid],
             onSuccess: async (data) => {
@@ -152,6 +134,7 @@ export const useUpdateMutation = (projectUuid: string, spaceUuid: string) => {
                     projectUuid,
                     'spaces',
                 ]);
+                await queryClient.invalidateQueries(['pinned_items']);
                 await queryClient.refetchQueries(['spaces', projectUuid]);
                 queryClient.setQueryData(
                     ['space', projectUuid, spaceUuid],
@@ -162,10 +145,10 @@ export const useUpdateMutation = (projectUuid: string, spaceUuid: string) => {
                     title: `Success! Space was updated.`,
                 });
             },
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to update space`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
@@ -180,22 +163,23 @@ const createSpace = async (projectUuid: string, data: CreateSpace) =>
     });
 
 export const useCreateMutation = (
-    projectUuid: string,
+    projectUuid?: string,
     options?: {
         onSuccess?: (space: Space) => void;
     },
 ) => {
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
 
     return useMutation<Space, ApiError, CreateSpace>(
-        (data) => createSpace(projectUuid, data),
+        (data) =>
+            projectUuid ? createSpace(projectUuid, data) : Promise.reject(),
         {
             mutationKey: ['space_create', projectUuid],
             onSuccess: async (space) => {
                 await queryClient.invalidateQueries([
                     'projects',
-                    projectUuid,
+                    projectUuid!,
                     'spaces',
                 ]);
 
@@ -205,36 +189,38 @@ export const useCreateMutation = (
                     title: `Success! Space was created.`,
                 });
             },
-            onError: (error) => {
-                showToastError({
+            onError: ({ error }) => {
+                showToastApiError({
                     title: `Failed to create space`,
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
         },
     );
 };
 
-const addSpaceShare = async (
+const addSpaceUserAccess = async (
     projectUuid: string,
     spaceUuid: string,
     userUuid: string,
+    spaceRole: string,
 ) =>
     lightdashApi<Space>({
         url: `/projects/${projectUuid}/spaces/${spaceUuid}/share`,
         method: 'POST',
-        body: JSON.stringify({ userUuid }),
+        body: JSON.stringify({ userUuid, spaceRole }),
     });
 
 export const useAddSpaceShareMutation = (
     projectUuid: string,
     spaceUuid: string,
 ) => {
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
 
-    return useMutation<Space, ApiError, string>(
-        (userUuid) => addSpaceShare(projectUuid, spaceUuid, userUuid),
+    return useMutation<Space, ApiError, [string, string]>(
+        ([userUuid, spaceRole]) =>
+            addSpaceUserAccess(projectUuid, spaceUuid, userUuid, spaceRole),
         {
             mutationKey: ['space_share', projectUuid, spaceUuid],
             onSuccess: async () => {
@@ -246,13 +232,13 @@ export const useAddSpaceShareMutation = (
                 ]);
 
                 showToastSuccess({
-                    title: `Success! Space was shared.`,
+                    title: `Success! Space access updated!`,
                 });
             },
-            onError: (error) => {
-                showToastError({
-                    title: `Failed to share space`,
-                    subtitle: error.error.message,
+            onError: ({ error }) => {
+                showToastApiError({
+                    title: `Failed to update space access`,
+                    apiError: error,
                 });
             },
         },
@@ -264,7 +250,7 @@ const deleteSpaceShare = async (
     spaceUuid: string,
     userUuid: string,
 ) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/projects/${projectUuid}/spaces/${spaceUuid}/share/${userUuid}`,
         method: 'DELETE',
         body: undefined,
@@ -274,10 +260,10 @@ export const useDeleteSpaceShareMutation = (
     projectUuid: string,
     spaceUuid: string,
 ) => {
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
 
-    return useMutation<undefined, ApiError, string>(
+    return useMutation<null, ApiError, string>(
         (userUuid) => deleteSpaceShare(projectUuid, spaceUuid, userUuid),
         {
             mutationKey: ['space_unshare', projectUuid, spaceUuid],
@@ -290,12 +276,102 @@ export const useDeleteSpaceShareMutation = (
                 ]);
 
                 showToastSuccess({
-                    title: `Success! Space was unshared.`,
+                    title: `Success! Space access updated!`,
+                });
+            },
+            onError: ({ error }) => {
+                showToastApiError({
+                    title: `Failed to update space access`,
+                    apiError: error,
+                });
+            },
+        },
+    );
+};
+
+const addGroupSpaceShare = async (
+    projectUuid: string,
+    spaceUuid: string,
+    groupUuid: string,
+    spaceRole: string,
+) =>
+    lightdashApi<Space>({
+        url: `/projects/${projectUuid}/spaces/${spaceUuid}/group/share`,
+        method: 'POST',
+        body: JSON.stringify({ groupUuid, spaceRole }),
+    });
+
+export const useAddGroupSpaceShareMutation = (
+    projectUuid: string,
+    spaceUuid: string,
+) => {
+    const { showToastSuccess, showToastError } = useToaster();
+    const queryClient = useQueryClient();
+
+    return useMutation<Space, ApiError, [string, string]>(
+        ([groupUuid, spaceRole]) =>
+            addGroupSpaceShare(projectUuid, spaceUuid, groupUuid, spaceRole),
+        {
+            mutationKey: ['group_space_share', projectUuid, spaceUuid],
+            onSuccess: async () => {
+                await queryClient.refetchQueries(['spaces', projectUuid]);
+                await queryClient.refetchQueries([
+                    'space',
+                    projectUuid,
+                    spaceUuid,
+                ]);
+
+                showToastSuccess({
+                    title: `Success! Space group access updated!`,
                 });
             },
             onError: (error) => {
                 showToastError({
-                    title: `Failed to unshare space`,
+                    title: `Failed to update space group access`,
+                    subtitle: error.error.message,
+                });
+            },
+        },
+    );
+};
+
+const deleteGroupSpaceShare = async (
+    projectUuid: string,
+    spaceUuid: string,
+    groupUuid: string,
+) =>
+    lightdashApi<null>({
+        url: `/projects/${projectUuid}/spaces/${spaceUuid}/group/share/${groupUuid}`,
+        method: 'DELETE',
+        body: undefined,
+    });
+
+export const useDeleteSpaceGroupAccessMutation = (
+    projectUuid: string,
+    spaceUuid: string,
+) => {
+    const { showToastSuccess, showToastError } = useToaster();
+    const queryClient = useQueryClient();
+
+    return useMutation<null, ApiError, string>(
+        (groupUuid) => deleteGroupSpaceShare(projectUuid, spaceUuid, groupUuid),
+        {
+            mutationKey: ['group_space_unshare', projectUuid, spaceUuid],
+            onSuccess: async () => {
+                await queryClient.refetchQueries(['spaces', projectUuid]);
+                await queryClient.refetchQueries([
+                    'space',
+                    projectUuid,
+                    spaceUuid,
+                ]);
+
+                showToastSuccess({
+                    title: `Success! Space group access updated!`,
+                });
+            },
+            onError: (error) => {
+                showToastError({
+                    title: `Failed to update space group access`,
                     subtitle: error.error.message,
                 });
             },

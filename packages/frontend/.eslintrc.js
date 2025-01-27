@@ -11,7 +11,7 @@ module.exports = {
         project: './tsconfig.json',
         createDefaultProgram: true,
     },
-    ignorePatterns: ['**/styles/*.css'],
+    ignorePatterns: ['**/styles/*.css', '.eslintrc.js'],
     extends: [
         './../../.eslintrc.js',
         'plugin:@typescript-eslint/recommended',
@@ -23,9 +23,10 @@ module.exports = {
         'plugin:react/recommended',
         'airbnb-typescript',
         'prettier',
+        'plugin:jest-dom/recommended',
+        'plugin:testing-library/react',
     ],
     plugins: [
-        '@typescript-eslint',
         'css-modules',
         'import',
         'json',
@@ -33,6 +34,9 @@ module.exports = {
         'prettier',
         'react-hooks',
         'react',
+        'jest-dom',
+        'testing-library',
+        'react-refresh',
     ],
 
     settings: {
@@ -76,5 +80,31 @@ module.exports = {
         'react/no-unescaped-entities': 'off',
         'react/react-in-jsx-scope': 'off',
         eqeqeq: 'off',
+
+        // testing
+        'jest-dom/prefer-checked': 'error',
+        'jest-dom/prefer-enabled-disabled': 'error',
+        'jest-dom/prefer-required': 'error',
+        'jest-dom/prefer-to-have-attribute': 'error',
+        'testing-library/await-async-queries': 'error',
+        'testing-library/no-await-sync-queries': 'error',
+        'testing-library/no-debugging-utils': 'warn',
+        'testing-library/no-dom-import': 'off',
+        '@typescript-eslint/consistent-type-imports': [
+            'error',
+            {
+                prefer: 'type-imports',
+                fixStyle: 'inline-type-imports',
+            },
+        ],
+        '@typescript-eslint/no-unused-vars': [
+            'error',
+            {
+                argsIgnorePattern: '^_',
+                varsIgnorePattern: '^_',
+                ignoreRestSiblings: true,
+            },
+        ],
+        'react-refresh/only-export-components': 'error',
     },
 };

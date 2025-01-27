@@ -1,9 +1,12 @@
 import {
+    AnyType,
     CreateWarehouseCredentials,
     DimensionType,
     Metric,
+    PartitionColumn,
     SupportedDbtAdapter,
     WarehouseCatalog,
+    WarehouseResults,
     WeekDay,
 } from '@lightdash/common';
 import { WarehouseClient } from '../types';
@@ -19,10 +22,6 @@ export default class WarehouseBaseClient<T extends CreateWarehouseCredentials>
     constructor(credentials: T) {
         this.credentials = credentials;
         this.startOfWeek = credentials.startOfWeek;
-    }
-
-    getFieldQuoteChar(): string {
-        throw new Error('Warehouse method not implemented.');
     }
 
     getAdapterType(): SupportedDbtAdapter {
@@ -43,11 +42,41 @@ export default class WarehouseBaseClient<T extends CreateWarehouseCredentials>
         throw new Error('Warehouse method not implemented.');
     }
 
-    async runQuery(sql: string): Promise<{
-        fields: Record<string, { type: DimensionType }>;
-        rows: Record<string, any>[];
-    }> {
+    async streamQuery(
+        query: string,
+        streamCallback: (data: WarehouseResults) => void,
+        options: {
+            values?: AnyType[];
+            tags?: Record<string, string>;
+            timezone?: string;
+        },
+    ): Promise<void> {
         throw new Error('Warehouse method not implemented.');
+    }
+
+    async runQuery(
+        sql: string,
+        tags?: Record<string, string>,
+        timezone?: string,
+        values?: AnyType[],
+    ) {
+        let fields: WarehouseResults['fields'] = {};
+        const rows: WarehouseResults['rows'] = [];
+
+        await this.streamQuery(
+            sql,
+            (data) => {
+                fields = data.fields;
+                rows.push(...data.rows);
+            },
+            {
+                values,
+                tags,
+                timezone,
+            },
+        );
+
+        return { fields, rows };
     }
 
     getMetricSql(sql: string, metric: Metric): string {
@@ -64,5 +93,58 @@ export default class WarehouseBaseClient<T extends CreateWarehouseCredentials>
 
     concatString(...args: string[]): string {
         return `CONCAT(${args.join(', ')})`;
+    }
+
+    async getAllTables(): Promise<
+        {
+            database: string;
+            schema: string;
+            table: string;
+            partitionColumn?: PartitionColumn;
+        }[]
+    > {
+        throw new Error('Warehouse method not implemented.');
+    }
+
+    async getFields(
+        tableName: string,
+        schema?: string,
+        database?: string,
+        tags?: Record<string, string>,
+    ): Promise<WarehouseCatalog> {
+        throw new Error('Warehouse method not implemented.');
+    }
+
+    parseWarehouseCatalog(
+        rows: Record<string, AnyType>[],
+        mapFieldType: (type: string) => DimensionType,
+    ): WarehouseCatalog {
+        return rows.reduce(
+            (
+                acc,
+                {
+                    table_catalog,
+                    table_schema,
+                    table_name,
+                    column_name,
+                    data_type,
+                },
+            ) => {
+                acc[table_catalog] = acc[table_catalog] || {};
+                acc[table_catalog][table_schema] =
+                    acc[table_catalog][table_schema] || {};
+                acc[table_catalog][table_schema][table_name] =
+                    acc[table_catalog][table_schema][table_name] || {};
+                if (column_name && data_type)
+                    acc[table_catalog][table_schema][table_name][column_name] =
+                        mapFieldType(data_type);
+                return acc;
+            },
+            {},
+        );
+    }
+
+    parseError(error: Error): Error {
+        return error;
     }
 }

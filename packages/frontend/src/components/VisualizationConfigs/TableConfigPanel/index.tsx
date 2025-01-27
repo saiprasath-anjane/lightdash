@@ -4,11 +4,10 @@ import React from 'react';
 import {
     COLLAPSABLE_CARD_BUTTON_PROPS,
     COLLAPSABLE_CARD_POPOVER_PROPS,
-} from '../../common/CollapsableCard';
+} from '../../common/CollapsableCard/constants';
 import MantineIcon from '../../common/MantineIcon';
-import { useVisualizationContext } from '../../LightdashVisualization/VisualizationProvider';
-
-import TableConfigTabs from './TableConfigTabs';
+import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
+import { ConfigTabs } from './TableConfigTabs';
 
 const TableConfigPanel: React.FC = () => {
     const { resultsData } = useVisualizationContext();
@@ -30,7 +29,7 @@ const TableConfigPanel: React.FC = () => {
 
             <Popover.Dropdown>
                 <Box w={320}>
-                    <TableConfigTabs />
+                    <ConfigTabs />
                 </Box>
             </Popover.Dropdown>
         </Popover>

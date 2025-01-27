@@ -3,13 +3,13 @@ import {
     Flex,
     Group,
     Modal,
-    ModalProps,
     Stack,
     Text,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { IconFolders } from '@tabler/icons-react';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { useMoveChartMutation } from '../../../hooks/useSavedQuery';
 import MantineIcon from '../MantineIcon';
 
@@ -27,12 +27,12 @@ const MoveChartThatBelongsToDashboardModal: FC<Props> = ({
     spaceUuid,
     spaceName,
     onConfirm,
-    ...modelProps
+    ...modalProps
 }) => {
     const { mutate: moveChartToSpace } = useMoveChartMutation({
         onSuccess: async () => {
             onConfirm();
-            modelProps.onClose();
+            modalProps.onClose();
         },
     });
 
@@ -50,7 +50,7 @@ const MoveChartThatBelongsToDashboardModal: FC<Props> = ({
                     </Title>
                 </Flex>
             }
-            {...modelProps}
+            {...modalProps}
         >
             <Stack mt="sm">
                 <Text>
@@ -72,7 +72,7 @@ const MoveChartThatBelongsToDashboardModal: FC<Props> = ({
                 <Text fw={600}>This change cannot be undone.</Text>
 
                 <Group position="right" spacing="xs">
-                    <Button variant="outline" onClick={modelProps.onClose}>
+                    <Button variant="outline" onClick={modalProps.onClose}>
                         Cancel
                     </Button>
 

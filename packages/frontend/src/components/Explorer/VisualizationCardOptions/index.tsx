@@ -2,6 +2,7 @@ import {
     assertUnreachable,
     CartesianSeriesType,
     ChartType,
+    FeatureFlags,
     isSeriesWithMixedChartTypes,
 } from '@lightdash/common';
 import { Button, Menu } from '@mantine/core';
@@ -14,29 +15,32 @@ import {
     IconChartPie,
     IconChevronDown,
     IconCode,
+    IconFilter,
     IconSquareNumber1,
     IconTable,
 } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
-import { FC, memo, useMemo } from 'react';
-import { useApp } from '../../../providers/AppProvider';
+import { memo, useMemo, type FC, type ReactNode } from 'react';
+import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
+import useApp from '../../../providers/App/useApp';
 import {
     COLLAPSABLE_CARD_BUTTON_PROPS,
     COLLAPSABLE_CARD_POPOVER_PROPS,
-} from '../../common/CollapsableCard';
+} from '../../common/CollapsableCard/constants';
 import MantineIcon from '../../common/MantineIcon';
-import { isBigNumberVisualizationConfig } from '../../LightdashVisualization/VisualizationBigNumberConfig';
-import { isCartesianVisualizationConfig } from '../../LightdashVisualization/VisualizationConfigCartesian';
-import { isPieVisualizationConfig } from '../../LightdashVisualization/VisualizationConfigPie';
-import { isTableVisualizationConfig } from '../../LightdashVisualization/VisualizationConfigTable';
-import { isCustomVisualizationConfig } from '../../LightdashVisualization/VisualizationCustomConfigProps';
-import { useVisualizationContext } from '../../LightdashVisualization/VisualizationProvider';
+import {
+    isBigNumberVisualizationConfig,
+    isCartesianVisualizationConfig,
+    isCustomVisualizationConfig,
+    isFunnelVisualizationConfig,
+    isPieVisualizationConfig,
+    isTableVisualizationConfig,
+} from '../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
 
 const VisualizationCardOptions: FC = memo(() => {
     const { health } = useApp();
-    // FEATURE FLAG: custom-visualizations-enabled
     const customVizEnabled = useFeatureFlagEnabled(
-        'custom-visualizations-enabled',
+        FeatureFlags.CustomVisualizationsEnabled,
     );
 
     const {
@@ -69,7 +73,7 @@ const VisualizationCardOptions: FC = memo(() => {
 
     const selectedChartType = useMemo<{
         text: string;
-        icon: JSX.Element;
+        icon: ReactNode;
     }>(() => {
         switch (visualizationConfig.chartType) {
             case ChartType.CARTESIAN: {
@@ -162,6 +166,11 @@ const VisualizationCardOptions: FC = memo(() => {
                 return {
                     text: 'Pie chart',
                     icon: <MantineIcon icon={IconChartPie} color="gray" />,
+                };
+            case ChartType.FUNNEL:
+                return {
+                    text: 'Funnel chart',
+                    icon: <MantineIcon icon={IconFilter} color="gray" />,
                 };
             case ChartType.CUSTOM:
                 return {
@@ -335,6 +344,24 @@ const VisualizationCardOptions: FC = memo(() => {
                     }}
                 >
                     Pie chart
+                </Menu.Item>
+
+                <Menu.Item
+                    disabled={disabled}
+                    color={
+                        isFunnelVisualizationConfig(visualizationConfig)
+                            ? 'blue'
+                            : undefined
+                    }
+                    icon={<MantineIcon icon={IconFilter} />}
+                    onClick={() => {
+                        setPivotDimensions(undefined);
+                        setStacking(undefined);
+                        setCartesianType(undefined);
+                        setChartType(ChartType.FUNNEL);
+                    }}
+                >
+                    Funnel chart
                 </Menu.Item>
 
                 <Menu.Item

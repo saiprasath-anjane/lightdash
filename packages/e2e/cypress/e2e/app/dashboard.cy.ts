@@ -8,7 +8,7 @@ describe('Dashboard', () => {
     it('Should see dashboard', () => {
         cy.visit(`/projects/${SEED_PROJECT.project_uuid}/dashboards`);
 
-        // wiat for the dashboard to load
+        // wait for the dashboard to load
         cy.findByText('Loading dashboards').should('not.exist');
 
         cy.contains('a', 'Jaffle dashboard').click();
@@ -58,7 +58,7 @@ describe('Dashboard', () => {
         );
         cy.findByRole('option', { name: 'credit_card' }).click();
         cy.findAllByRole('tab').eq(0).click();
-        cy.contains('button', 'Apply').click();
+        cy.contains('button', 'Apply').click({ force: true });
 
         cy.contains('bank_transfer').should('have.length', 0);
 
@@ -136,7 +136,7 @@ describe('Dashboard', () => {
             'credit_card',
         );
         cy.findByRole('option', { name: 'credit_card' }).click();
-        cy.contains('button', 'Apply').click();
+        cy.contains('button', 'Apply').click({ force: true });
 
         // Filter should be applied and no other payment methods should be visible in the charts
         cy.contains('bank_transfer').should('have.length', 0);
@@ -168,14 +168,22 @@ describe('Dashboard', () => {
         // Check tile targets are correct and all charts have that filter applied
         cy.contains('Payment method is credit_card').click();
         cy.findAllByRole('tab').eq(1).click();
-        cy.get('.mantine-Checkbox-body').should('have.length', 4); // 3 checkboxes for the 3 charts + `select all` checkbox
-        cy.get('.mantine-Checkbox-body').each(($el) => {
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        ).should('have.length', 4); // 3 checkboxes for the 3 charts + `select all` checkbox
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        ).each(($el) => {
             cy.wrap($el).find('input[checked]').should('have.length', 1);
         });
 
         // Remove filter from first chart - saved chart
-        cy.get('.mantine-Checkbox-body').eq(1).click();
-        cy.contains('button', 'Apply').click();
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        )
+            .eq(1)
+            .click();
+        cy.contains('button', 'Apply').click({ force: true });
 
         // Saved chart should have no filter applied
         cy.get('.react-grid-item').first().should('contain', 'bank_transfer');
@@ -187,6 +195,7 @@ describe('Dashboard', () => {
         cy.findByText('You are creating this chart from within "Title"').should(
             'exist',
         );
+        cy.findByText('staging').click();
         cy.findByText('Stg payments').click();
         cy.findByText('Payment method').click();
         cy.findByText('Amount').click();
@@ -203,18 +212,28 @@ describe('Dashboard', () => {
         cy.url().should('include', '/dashboards');
 
         // Open filter popover  and check that all charts have the filter applied except for the new one (which is referencing another explore)
-        cy.contains('Payment method is credit_card').click();
+        cy.contains('Payment method is credit_card').click(); // Note: disable React strict mode in local dev to avoid error in this line
         cy.findAllByRole('tab').eq(1).click();
-        cy.get('.mantine-Checkbox-body').should('have.length', 5); // 4 checkboxes for the 4 charts + `select all` checkbox
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        ).should('have.length', 5); // 4 checkboxes for the 4 charts + `select all` checkbox
 
         // Enable filter for the new chart
-        cy.get('.mantine-Checkbox-body').eq(4).click();
-        cy.get('.mantine-Checkbox-body')
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        )
+            .eq(4)
+            .click();
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        )
             .eq(4)
             .within(() => {
                 cy.get('input').should('be.checked');
             });
-        cy.get('.mantine-Checkbox-body')
+        cy.get(
+            '[data-testid="DashboardFilterConfiguration/ChartTiles"] .mantine-Checkbox-body',
+        )
             .eq(4)
             .parent()
             .parent()
@@ -226,7 +245,7 @@ describe('Dashboard', () => {
                     'Stg payments Payment method',
                 );
             });
-        cy.contains('button', 'Apply').click();
+        cy.contains('button', 'Apply').click({ force: true });
 
         // Saved chart should have the filter applied and only see credit_card bar
         cy.get('.react-grid-item')
@@ -237,10 +256,10 @@ describe('Dashboard', () => {
         cy.findAllByText('Add tile').click();
         cy.findByText('Markdown').click();
         cy.findByLabelText('Title').type('Title');
-        cy.get('textarea').type('Content');
+        cy.get('.mantine-Modal-body').find('textarea').type('Content');
         cy.findByText('Add').click();
 
-        cy.findByText('Save').click();
+        cy.findByText('Save changes').click();
 
         cy.contains('Dashboard was updated');
 

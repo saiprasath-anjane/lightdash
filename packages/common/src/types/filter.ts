@@ -1,4 +1,5 @@
-import { ConditionalOperator, ConditionalRule } from './conditionalRule';
+import { type AnyType } from './any';
+import { ConditionalOperator, type ConditionalRule } from './conditionalRule';
 import type { SchedulerFilterRule } from './scheduler';
 
 export enum FilterType {
@@ -32,6 +33,28 @@ export const unitOfTimeFormat: Record<UnitOfTime, string> = {
     years: 'YYYY',
 };
 
+export const getUnitsOfTimeGreaterOrEqual = (
+    unit: UnitOfTime,
+): UnitOfTime[] => {
+    const unitsInOrder: UnitOfTime[] = [
+        UnitOfTime.milliseconds,
+        UnitOfTime.seconds,
+        UnitOfTime.minutes,
+        UnitOfTime.hours,
+        UnitOfTime.days,
+        UnitOfTime.weeks,
+        UnitOfTime.months,
+        UnitOfTime.quarters,
+        UnitOfTime.years,
+    ];
+    const index = unitsInOrder.indexOf(unit);
+    if (index === -1) {
+        // return the original array if the unit is not found
+        return unitsInOrder;
+    }
+    return unitsInOrder.slice(index);
+};
+
 export type FieldTarget = {
     fieldId: string;
 };
@@ -39,13 +62,14 @@ export type FieldTarget = {
 export interface FilterRule<
     O = ConditionalOperator,
     T = FieldTarget,
-    V = any,
-    S = any,
+    V = AnyType,
+    S = AnyType,
 > extends ConditionalRule<O, V> {
     id: string;
     target: T;
     settings?: S;
     disabled?: boolean;
+    required?: boolean;
 }
 
 export interface MetricFilterRule
@@ -56,16 +80,22 @@ export type DashboardFieldTarget = {
     tableName: string;
 };
 
-type DashboardTileTarget = DashboardFieldTarget | false;
+export type DashboardTileTarget = DashboardFieldTarget | false;
 
 export type DashboardFilterRule<
     O = ConditionalOperator,
     T extends DashboardFieldTarget = DashboardFieldTarget,
-    V = any,
-    S = any,
+    V = AnyType,
+    S = AnyType,
 > = FilterRule<O, T, V, S> & {
     tileTargets?: Record<string, DashboardTileTarget>;
     label: undefined | string;
+};
+
+export type FilterDashboardToRule = DashboardFilterRule & {
+    target: {
+        fieldName: string;
+    };
 };
 
 export type DashboardFilterRuleOverride = Omit<
@@ -73,14 +103,16 @@ export type DashboardFilterRuleOverride = Omit<
     'tileTargets'
 >;
 
+export type DateFilterSettings = {
+    unitOfTime?: UnitOfTime;
+    completed?: boolean;
+};
+
 export type DateFilterRule = FilterRule<
     ConditionalOperator,
     unknown,
-    any,
-    {
-        unitOfTime?: UnitOfTime;
-        completed?: boolean;
-    }
+    AnyType,
+    DateFilterSettings
 >;
 
 export type FilterGroupItem = FilterGroup | FilterRule;
@@ -135,8 +167,18 @@ export const isAndFilterGroup = (
 export const isFilterGroup = (value: FilterGroupItem): value is FilterGroup =>
     isOrFilterGroup(value) || isAndFilterGroup(value);
 
-export const isFilterRule = (value: ConditionalRule): value is FilterRule =>
+export const isFilterRule = (
+    value: ConditionalRule | FilterGroupItem,
+): value is FilterRule =>
     'id' in value && 'target' in value && 'operator' in value;
+
+export const isFilterTarget = (value: unknown): value is FieldTarget =>
+    !!value && typeof value === 'object' && 'fieldId' in value;
+
+export const isMetricFilterTarget = (
+    value: unknown,
+): value is { fieldRef: string } =>
+    !!value && typeof value === 'object' && 'fieldRef' in value;
 
 export const getFilterRules = (filters: Filters): FilterRule[] => {
     const rules: FilterRule[] = [];
@@ -165,6 +207,82 @@ export const getFilterRules = (filters: Filters): FilterRule[] => {
         rules.push(...flattenFilterGroup(filters.tableCalculations));
     }
     return rules;
+};
+
+export const updateFieldIdInFilterGroupItem = (
+    filterGroupItem: FilterGroupItem,
+    previousName: string,
+    newName: string,
+): void => {
+    if (isFilterGroup(filterGroupItem)) {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        updateFieldIdInFilters(filterGroupItem, previousName, newName);
+    } else if (filterGroupItem.target.fieldId === previousName) {
+        // eslint-disable-next-line no-param-reassign
+        filterGroupItem.target.fieldId = newName;
+    }
+};
+
+export const updateFieldIdInFilters = (
+    filterGroup: FilterGroup | undefined,
+    previousName: string,
+    newName: string,
+): void => {
+    if (filterGroup) {
+        if (isOrFilterGroup(filterGroup)) {
+            filterGroup.or.forEach((item) =>
+                updateFieldIdInFilterGroupItem(item, previousName, newName),
+            );
+        } else if (isAndFilterGroup(filterGroup)) {
+            filterGroup.and.forEach((item) =>
+                updateFieldIdInFilterGroupItem(item, previousName, newName),
+            );
+        }
+    }
+};
+
+export const removeFieldFromFilterGroup = (
+    filterGroup: FilterGroup | undefined,
+    fieldId: string,
+): FilterGroup | undefined => {
+    if (!filterGroup) {
+        return undefined;
+    }
+
+    const removeFiltersGroupItems = (
+        items: FilterGroupItem[],
+    ): FilterGroupItem[] =>
+        items.reduce<FilterGroupItem[]>((acc, item) => {
+            if (isFilterGroup(item)) {
+                const updatedGroup = removeFieldFromFilterGroup(item, fieldId); // remove field from filter groups recursively
+                if (updatedGroup) {
+                    acc.push(updatedGroup);
+                }
+            } else if (item.target.fieldId !== fieldId) {
+                // keep filter rule if fieldId does not match
+                acc.push(item);
+            }
+            return acc;
+        }, []);
+
+    if (isOrFilterGroup(filterGroup)) {
+        const updatedItems = removeFiltersGroupItems(filterGroup.or);
+        if (updatedItems.length === 0) {
+            return undefined;
+        }
+        return {
+            ...filterGroup,
+            or: updatedItems,
+        };
+    }
+    const updatedItems = removeFiltersGroupItems(filterGroup.and);
+    if (updatedItems.length === 0) {
+        return undefined;
+    }
+    return {
+        ...filterGroup,
+        and: updatedItems,
+    };
 };
 
 export const applyDimensionOverrides = (
@@ -301,5 +419,41 @@ export const compressDashboardFiltersToParam = (
         }),
         { dimensions: [], metrics: [], tableCalculations: [] },
     );
+
+export const isFilterRuleDefinedForFieldId = (
+    filterGroup: FilterGroup,
+    fieldId: string,
+    isInterval: boolean = false,
+): boolean => {
+    // Check if the filter group is an 'and' or 'or' group
+    const filterGroupItems = isAndFilterGroup(filterGroup)
+        ? filterGroup.and
+        : filterGroup.or;
+
+    // If the item is a filter rule, check if its id matches the provided filter rule id
+    const isMatchingFieldId = (item: FilterGroupItem) => {
+        if (!isFilterGroup(item)) {
+            // If the item is not a filter group, check if it matches the fieldId
+            return isInterval
+                ? item.target.fieldId.startsWith(fieldId)
+                : item.target.fieldId === fieldId;
+        }
+        return false;
+    };
+    const isFilterRulePresent = (
+        item: OrFilterGroup | AndFilterGroup | FilterRule,
+    ): boolean => {
+        if (isMatchingFieldId(item)) {
+            return true;
+        }
+        if (isFilterGroup(item)) {
+            // If the item is a filter group, recursively check its items
+            return isFilterRuleDefinedForFieldId(item, fieldId, isInterval);
+        }
+        return false;
+    };
+    // If the filter rule was not found in the filter group, return false
+    return filterGroupItems.some(isFilterRulePresent);
+};
 
 export { ConditionalOperator as FilterOperator };

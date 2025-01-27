@@ -3,7 +3,15 @@ export enum OpenIdIdentityIssuerType {
     OKTA = 'okta',
     ONELOGIN = 'oneLogin',
     AZUREAD = 'azuread',
+    GENERIC_OIDC = 'oidc',
 }
+
+export const isOpenIdIdentityIssuerType = (
+    value: string,
+): value is OpenIdIdentityIssuerType =>
+    Object.values(OpenIdIdentityIssuerType).includes(
+        value as OpenIdIdentityIssuerType,
+    );
 
 export type CreateOpenIdIdentity = {
     subject: string;
@@ -19,7 +27,8 @@ export type UpdateOpenIdentity = Pick<
     'subject' | 'issuer' | 'email' | 'issuerType' | 'refreshToken'
 >;
 
-export type OpenIdIdentity = CreateOpenIdIdentity & {
+export type OpenIdIdentity = Omit<CreateOpenIdIdentity, 'userId'> & {
+    userUuid: string;
     createdAt: Date;
 };
 

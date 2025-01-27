@@ -1,6 +1,9 @@
-import { ApiCsvUrlResponse, ApiErrorPayload } from '@lightdash/common';
 import {
-    Controller,
+    ApiCsvUrlResponse,
+    ApiErrorPayload,
+    UnexpectedServerError,
+} from '@lightdash/common';
+import {
     Get,
     Middlewares,
     OperationId,
@@ -12,13 +15,13 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
-import { schedulerService } from '../services/services';
 import { allowApiKeyAuthentication, isAuthenticated } from './authentication';
+import { BaseController } from './baseController';
 
 @Route('/api/v1/csv')
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('Exports')
-export class CsvController extends Controller {
+export class CsvController extends BaseController {
     /**
      * Get a Csv
      * @param jobId the jobId for the CSV
@@ -33,7 +36,9 @@ export class CsvController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiCsvUrlResponse> {
         this.setStatus(200);
-        const csvDetails = await schedulerService.getCsvUrl(req.user!, jobId);
+        const csvDetails = await this.services
+            .getSchedulerService()
+            .getCsvUrl(req.user!, jobId);
         return {
             status: 'ok',
             results: {

@@ -1,4 +1,8 @@
-import { ConditionalOperator, DashboardFilterRule } from '@lightdash/common';
+import {
+    ConditionalOperator,
+    type DashboardFilterRule,
+} from '@lightdash/common';
+import { describe, expect, it } from 'vitest';
 import { createOverrideDashboardSavedFiltersUrlSubParam } from './dashboardSavedFiltersOverride';
 
 describe('dashboardSavedFiltersOverride', () => {

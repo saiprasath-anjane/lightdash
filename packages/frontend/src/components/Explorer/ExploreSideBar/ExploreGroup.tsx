@@ -1,6 +1,6 @@
 import { Group, NavLink } from '@mantine/core';
 import { IconChevronRight } from '@tabler/icons-react';
-import { FC } from 'react';
+import { type FC } from 'react';
 import { useToggle } from 'react-use';
 import MantineIcon from '../../common/MantineIcon';
 
@@ -8,7 +8,10 @@ type Props = {
     label: string;
 };
 
-const ExploreGroup: FC<Props> = ({ label, children }) => {
+const ExploreGroup: FC<React.PropsWithChildren<Props>> = ({
+    label,
+    children,
+}) => {
     const [isOpen, toggleOpen] = useToggle(false);
 
     return (

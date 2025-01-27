@@ -51,9 +51,6 @@ package-lock.json
 /dbt
 /profile*
 
-# docs
-/docs/build
-/docs/.docusaurus
 
 # credentials
 credentials.json
@@ -64,3 +61,10 @@ packages/backend/target/
 venv/
 dbt_modules/
 logs/
+/.envrc
+
+# dangerfile
+dangerfile.development.ts
+
+# Charts as code
+lightdash

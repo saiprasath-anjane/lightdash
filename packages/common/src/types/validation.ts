@@ -13,7 +13,7 @@ export type ValidationResponseBase = {
 
 export type ValidationErrorChartResponse = ValidationResponseBase & {
     chartUuid: string | undefined; // NOTE: can be undefined if private content
-    chartType?: ChartKind;
+    chartKind?: ChartKind;
     fieldName?: string;
     lastUpdatedBy?: string;
     lastUpdatedAt?: Date;
@@ -99,6 +99,7 @@ export enum ValidationErrorType {
     Metric = 'metric',
     Model = 'model',
     Dimension = 'dimension',
+    CustomMetric = 'custom metric',
 }
 
 export enum ValidationSourceType {
@@ -121,3 +122,15 @@ export const isDashboardValidationError = (
     error: ValidationResponse | CreateValidation,
 ): error is ValidationErrorDashboardResponse | CreateDashboardValidation =>
     error.source === ValidationSourceType.Dashboard;
+
+export enum ValidationTarget {
+    CHARTS = 'charts',
+    DASHBOARDS = 'dashboards',
+    TABLES = 'tables',
+}
+
+export function isValidationTargetValid(validationTarget: string) {
+    return Object.values(ValidationTarget).includes(
+        validationTarget as ValidationTarget,
+    );
+}

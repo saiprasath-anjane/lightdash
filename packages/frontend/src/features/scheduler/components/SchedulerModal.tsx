@@ -1,7 +1,9 @@
+import { type ItemsMap } from '@lightdash/common';
 import { Group, Modal, Text } from '@mantine/core';
-import { IconSend } from '@tabler/icons-react';
-import React, { FC } from 'react';
+import { IconBell, IconSend } from '@tabler/icons-react';
+import React, { type FC } from 'react';
 import MantineIcon from '../../../components/common/MantineIcon';
+import DocumentationHelpButton from '../../../components/DocumentationHelpButton';
 import SchedulerModalContent from './SchedulerModalContent';
 
 const SchedulersModal: FC<
@@ -9,6 +11,8 @@ const SchedulersModal: FC<
         name: string;
         onClose?: () => void;
         isOpen?: boolean;
+        isThresholdAlert?: boolean;
+        itemsMap?: ItemsMap;
     }
 > = ({
     resourceUuid,
@@ -16,19 +20,38 @@ const SchedulersModal: FC<
     createMutation,
     isOpen = false,
     isChart,
+    isThresholdAlert,
+    itemsMap,
     onClose = () => {},
 }) => {
     return (
         <Modal
             opened={isOpen}
             onClose={onClose}
-            size="lg"
+            size="xl"
             yOffset={65}
             title={
-                <Group spacing="xs">
-                    <MantineIcon icon={IconSend} size="lg" color="gray.7" />
-                    <Text fw={600}>Scheduled deliveries</Text>
-                </Group>
+                isThresholdAlert ? (
+                    <Group spacing="xs">
+                        <MantineIcon icon={IconBell} size="lg" color="gray.7" />
+                        <Text fw={600}>Alerts</Text>
+                        <DocumentationHelpButton
+                            href="https://docs.lightdash.com/guides/how-to-create-alerts"
+                            pos="relative"
+                            top="2px"
+                        />
+                    </Group>
+                ) : (
+                    <Group spacing="xs">
+                        <MantineIcon icon={IconSend} size="lg" color="gray.7" />
+                        <Text fw={600}>Scheduled deliveries</Text>
+                        <DocumentationHelpButton
+                            href="https://docs.lightdash.com/guides/how-to-create-scheduled-deliveries"
+                            pos="relative"
+                            top="2px"
+                        />
+                    </Group>
+                )
             }
             styles={(theme) => ({
                 header: { borderBottom: `1px solid ${theme.colors.gray[4]}` },
@@ -41,6 +64,8 @@ const SchedulersModal: FC<
                 createMutation={createMutation}
                 onClose={onClose}
                 isChart={isChart}
+                isThresholdAlert={isThresholdAlert}
+                itemsMap={itemsMap}
             />
         </Modal>
     );

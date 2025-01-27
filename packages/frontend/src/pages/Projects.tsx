@@ -1,26 +1,28 @@
-import { FC } from 'react';
-import { Redirect } from 'react-router-dom';
+import { type FC } from 'react';
+import { Navigate } from 'react-router';
 import ErrorState from '../components/common/ErrorState';
 import PageSpinner from '../components/PageSpinner';
 import { useActiveProjectUuid } from '../hooks/useActiveProject';
 import { useProjects } from '../hooks/useProjects';
 
 const Projects: FC = () => {
-    const { isLoading, data, error } = useProjects();
+    const { isInitialLoading, data, error } = useProjects();
     const { isLoading: isActiveProjectLoading, activeProjectUuid } =
         useActiveProjectUuid();
 
-    if (isLoading || isActiveProjectLoading || !activeProjectUuid) {
+    if (!isInitialLoading && data && data.length === 0) {
+        return <Navigate to="/no-access" />;
+    }
+
+    if (isInitialLoading || isActiveProjectLoading || !activeProjectUuid) {
         return <PageSpinner />;
     }
+
     if (error && error.error) {
         return <ErrorState error={error.error} />;
     }
-    if (!data || data.length <= 0) {
-        return <Redirect to="/no-access" />;
-    }
 
-    return <Redirect to={`/projects/${activeProjectUuid}/home`} />;
+    return <Navigate to={`/projects/${activeProjectUuid}/home`} />;
 };
 
 export default Projects;

@@ -1,28 +1,25 @@
-import { FC } from 'react';
-import { useQueryClient } from 'react-query';
-import { useHistory, useParams } from 'react-router-dom';
-
 import { Stack, Text, Title } from '@mantine/core';
+import { useQueryClient } from '@tanstack/react-query';
+import { type FC } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import Page from '../components/common/Page/Page';
 import PageSpinner from '../components/PageSpinner';
 import ProjectTablesConfiguration from '../components/ProjectTablesConfiguration/ProjectTablesConfiguration';
-import { useApp } from '../providers/AppProvider';
+import useApp from '../providers/App/useApp';
 
 const CreateProjectSettings: FC = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const queryClient = useQueryClient();
-    const history = useHistory();
+    const navigate = useNavigate();
     const { health } = useApp();
-    if (health.isLoading) {
+    if (health.isInitialLoading) {
         return <PageSpinner />;
     }
 
     const onSuccess = async () => {
         await queryClient.invalidateQueries(['health']);
         await queryClient.refetchQueries(['organization']);
-        history.push({
-            pathname: `/projects/${projectUuid}/home`,
-        });
+        await navigate(`/projects/${projectUuid}/home`);
     };
 
     return (
@@ -40,10 +37,12 @@ const CreateProjectSettings: FC = () => {
                     </Text>
                 </Stack>
 
-                <ProjectTablesConfiguration
-                    projectUuid={projectUuid}
-                    onSuccess={onSuccess}
-                />
+                {!!projectUuid && (
+                    <ProjectTablesConfiguration
+                        projectUuid={projectUuid}
+                        onSuccess={onSuccess}
+                    />
+                )}
             </Stack>
         </Page>
     );

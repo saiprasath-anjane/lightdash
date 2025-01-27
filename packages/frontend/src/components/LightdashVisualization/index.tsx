@@ -1,11 +1,12 @@
 import { assertUnreachable, ChartType } from '@lightdash/common';
-import { FC, memo } from 'react';
+import { memo, type FC } from 'react';
 import CustomVisualization from '../CustomVisualization';
+import FunnelChart from '../FunnelChart';
 import SimpleChart from '../SimpleChart';
 import SimplePieChart from '../SimplePieChart';
 import SimpleStatistic from '../SimpleStatistic';
 import SimpleTable from '../SimpleTable';
-import { useVisualizationContext } from './VisualizationProvider';
+import { useVisualizationContext } from './useVisualizationContext';
 
 interface LightdashVisualizationProps {
     isDashboard?: boolean;
@@ -66,6 +67,16 @@ const LightdashVisualization: FC<LightdashVisualizationProps> = memo(
             case ChartType.PIE:
                 return (
                     <SimplePieChart
+                        className={className}
+                        isInDashboard={!!isDashboard}
+                        $shouldExpand
+                        data-testid={props['data-testid']}
+                        {...props}
+                    />
+                );
+            case ChartType.FUNNEL:
+                return (
+                    <FunnelChart
                         className={className}
                         isInDashboard={!!isDashboard}
                         $shouldExpand

@@ -1,22 +1,17 @@
-import { MantineProvider, MantineThemeOverride } from '@mantine/core';
-import { FC } from 'react';
-import { useParams } from 'react-router-dom';
-import styled from 'styled-components';
+import { Box, MantineProvider, type MantineThemeOverride } from '@mantine/core';
+import { type FC } from 'react';
+import { useParams } from 'react-router';
 import LightdashVisualization from '../components/LightdashVisualization';
 import VisualizationProvider from '../components/LightdashVisualization/VisualizationProvider';
 import { useDateZoomGranularitySearch } from '../hooks/useExplorerRoute';
 import { useQueryResults } from '../hooks/useQueryResults';
 import { useSavedQuery } from '../hooks/useSavedQuery';
-import { useApp } from '../providers/AppProvider';
-import {
-    ExplorerProvider,
-    ExplorerSection,
-    useExplorerContext,
-} from '../providers/ExplorerProvider';
+import useSearchParams from '../hooks/useSearchParams';
+import useApp from '../providers/App/useApp';
+import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
+import { ExplorerSection } from '../providers/Explorer/types';
+import useExplorerContext from '../providers/Explorer/useExplorerContext';
 
-const StyledLightdashVisualization = styled(LightdashVisualization)`
-    min-height: inherit;
-`;
 const themeOverride: MantineThemeOverride = {
     globalStyles: () => ({
         'html, body': {
@@ -39,7 +34,7 @@ const MinimalExplorer: FC = () => {
         (context) => context.queryResults.isLoading,
     );
 
-    if (!savedChart || health.isLoading || !health.data) {
+    if (!savedChart || health.isInitialLoading || !health.data) {
         return null;
     }
 
@@ -56,11 +51,13 @@ const MinimalExplorer: FC = () => {
             colorPalette={savedChart.colorPalette}
         >
             <MantineProvider inherit theme={themeOverride}>
-                <StyledLightdashVisualization
-                    // get rid of the classNames once you remove analytics providers
-                    className="sentry-block ph-no-capture"
-                    data-testid="visualization"
-                />
+                <Box mih="inherit" h="100%">
+                    <LightdashVisualization
+                        // get rid of the classNames once you remove analytics providers
+                        className="sentry-block ph-no-capture"
+                        data-testid="visualization"
+                    />
+                </Box>
             </MantineProvider>
         </VisualizationProvider>
     );
@@ -71,8 +68,9 @@ const MinimalSavedExplorer: FC = () => {
         savedQueryUuid: string;
         projectUuid: string;
     }>();
+    const context = useSearchParams('context') || undefined;
 
-    const { data, isLoading, isError, error } = useSavedQuery({
+    const { data, isInitialLoading, isError, error } = useSavedQuery({
         id: savedQueryUuid,
     });
 
@@ -82,9 +80,10 @@ const MinimalSavedExplorer: FC = () => {
         chartUuid: savedQueryUuid,
         isViewOnly: true,
         dateZoomGranularity,
+        context,
     });
 
-    if (isLoading) {
+    if (isInitialLoading) {
         return null;
     }
 
@@ -109,6 +108,9 @@ const MinimalSavedExplorer: FC = () => {
                               pivotConfig: data.pivotConfig,
                           },
                           modals: {
+                              format: {
+                                  isOpen: false,
+                              },
                               additionalMetric: {
                                   isOpen: false,
                               },

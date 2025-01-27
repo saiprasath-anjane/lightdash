@@ -1,7 +1,7 @@
-import { Flex, Text } from '@mantine/core';
-import { DateTimePickerProps, DayOfWeek } from '@mantine/dates';
+import { Group, Text } from '@mantine/core';
+import { type DateTimePickerProps, type DayOfWeek } from '@mantine/dates';
 import dayjs from 'dayjs';
-import { FC, useState } from 'react';
+import { useState, type FC } from 'react';
 import FilterDateTimePicker from './FilterDateTimePicker';
 
 interface Props
@@ -25,28 +25,35 @@ const FilterDateTimeRangePicker: FC<Props> = ({
     const [date2, setDate2] = useState(value?.[1] ?? null);
 
     return (
-        <Flex align="center" w="100%" gap="xxs">
+        <Group noWrap align="start" w="100%" spacing="xs">
             <FilterDateTimePicker
                 size="xs"
                 withSeconds
                 disabled={disabled}
+                // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                // @ts-ignore
                 placeholder="Start date"
+                showTimezone={false}
                 maxDate={
-                    date2 ? dayjs(date2).subtract(1, 'day').toDate() : undefined
+                    date2
+                        ? dayjs(date2).subtract(1, 'second').toDate()
+                        : undefined
                 }
                 firstDayOfWeek={firstDayOfWeek}
                 {...rest}
                 value={date1}
                 onChange={(newDate) => {
-                    setDate1(newDate);
+                    if (!date2 || dayjs(newDate).isBefore(dayjs(date2))) {
+                        setDate1(newDate);
 
-                    if (newDate && date2) {
-                        onChange([newDate, date2]);
+                        if (newDate && date2) {
+                            onChange([newDate, date2]);
+                        }
                     }
                 }}
             />
 
-            <Text color="dimmed" sx={{ whiteSpace: 'nowrap' }} size="xs">
+            <Text color="dimmed" mt={7} sx={{ whiteSpace: 'nowrap' }} size="xs">
                 –
             </Text>
 
@@ -54,22 +61,25 @@ const FilterDateTimeRangePicker: FC<Props> = ({
                 size="xs"
                 withSeconds
                 disabled={disabled}
+                // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                // @ts-ignore
                 placeholder="End date"
                 minDate={
-                    date1 ? dayjs(date1).add(1, 'day').toDate() : undefined
+                    date1 ? dayjs(date1).add(1, 'second').toDate() : undefined
                 }
                 firstDayOfWeek={firstDayOfWeek}
                 {...rest}
                 value={date2}
                 onChange={(newDate) => {
-                    setDate2(newDate);
-
-                    if (newDate && date1) {
-                        onChange([date1, newDate]);
+                    if (!date1 || dayjs(newDate).isAfter(dayjs(date1))) {
+                        setDate2(newDate);
+                        if (newDate && date1) {
+                            onChange([date1, newDate]);
+                        }
                     }
                 }}
             />
-        </Flex>
+        </Group>
     );
 };
 

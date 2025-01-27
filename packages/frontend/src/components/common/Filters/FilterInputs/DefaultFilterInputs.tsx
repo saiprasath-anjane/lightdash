@@ -1,15 +1,15 @@
 import {
     assertUnreachable,
-    ConditionalRule,
     FilterOperator,
     FilterType,
     isFilterRule,
-    isTableCalculationField,
+    isTableCalculation,
+    type ConditionalRule,
 } from '@lightdash/common';
 import isString from 'lodash/isString';
-import { FilterInputsProps } from '.';
+import { type FilterInputsProps } from '.';
 import { TagInput } from '../../TagInput/TagInput';
-import { useFiltersContext } from '../FiltersProvider';
+import useFiltersContext from '../useFiltersContext';
 import { getPlaceholderByFilterTypeAndOperator } from '../utils/getPlaceholderByFilterTypeAndOperator';
 import FilterMultiStringInput from './FilterMultiStringInput';
 import FilterNumberInput from './FilterNumberInput';
@@ -48,11 +48,11 @@ const DefaultFilterInputs = <T extends ConditionalRule>({
         case FilterOperator.NOT_EQUALS: {
             switch (filterType) {
                 case FilterType.STRING:
-                    return isTableCalculationField(field) ? (
+                    return isTableCalculation(field) ? (
                         <FilterMultiStringInput
                             disabled={disabled}
-                            field={field}
                             placeholder={placeholder}
+                            autoFocus={true}
                             withinPortal={popoverProps?.withinPortal}
                             onDropdownOpen={popoverProps?.onOpen}
                             onDropdownClose={popoverProps?.onClose}
@@ -69,6 +69,7 @@ const DefaultFilterInputs = <T extends ConditionalRule>({
                             filterId={rule.id}
                             disabled={disabled}
                             field={field}
+                            autoFocus={true}
                             placeholder={placeholder}
                             suggestions={suggestions || []}
                             withinPortal={popoverProps?.withinPortal}
@@ -91,6 +92,7 @@ const DefaultFilterInputs = <T extends ConditionalRule>({
                         <TagInput
                             w="100%"
                             clearable
+                            autoFocus={true}
                             size="xs"
                             disabled={disabled}
                             placeholder={placeholder}
@@ -119,16 +121,18 @@ const DefaultFilterInputs = <T extends ConditionalRule>({
         case FilterOperator.NOT_IN_THE_PAST:
         case FilterOperator.IN_THE_NEXT:
         case FilterOperator.IN_THE_CURRENT:
+        case FilterOperator.NOT_IN_THE_CURRENT:
         case FilterOperator.IN_BETWEEN:
             return (
                 <FilterNumberInput
                     disabled={disabled}
+                    autoFocus={true}
                     placeholder={placeholder}
                     value={rule.values?.[0]}
                     onChange={(newValue) => {
                         onChange({
                             ...rule,
-                            values: newValue ? [newValue] : [],
+                            values: newValue !== null ? [newValue] : [],
                         });
                     }}
                 />

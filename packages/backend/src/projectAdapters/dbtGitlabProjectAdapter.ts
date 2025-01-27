@@ -21,6 +21,8 @@ type DbtGitlabProjectAdapterArgs = {
     environment: DbtProjectEnvironmentVariable[] | undefined;
     cachedWarehouse: CachedWarehouse;
     dbtVersion: SupportedDbtVersions;
+    useDbtLs: boolean;
+    selector?: string;
 };
 
 export class DbtGitlabProjectAdapter extends DbtGitProjectAdapter {
@@ -36,6 +38,8 @@ export class DbtGitlabProjectAdapter extends DbtGitProjectAdapter {
         environment,
         cachedWarehouse,
         dbtVersion,
+        useDbtLs,
+        selector,
     }: DbtGitlabProjectAdapterArgs) {
         const remoteRepositoryUrl = `https://lightdash:${gitlabPersonalAccessToken}@${
             hostDomain || DEFAULT_GITLAB_HOST_DOMAIN
@@ -44,12 +48,15 @@ export class DbtGitlabProjectAdapter extends DbtGitProjectAdapter {
             warehouseClient,
             gitBranch: gitlabBranch,
             remoteRepositoryUrl,
+            repository: gitlabRepository,
             projectDirectorySubPath,
             warehouseCredentials,
             targetName,
             environment,
             cachedWarehouse,
             dbtVersion,
+            useDbtLs,
+            selector,
         });
     }
 }

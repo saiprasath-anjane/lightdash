@@ -19,6 +19,7 @@ const createSchedulerBody: CreateSchedulerAndTargetsWithoutIds = {
     targets: [{ channel: 'C1' }, { channel: 'C2' }],
     format: SchedulerFormat.IMAGE,
     options: {},
+    timezone: 'UTC', // Explicitely set the timezone to be UTC since the project default might have been changed which will make the tests fail
 };
 
 const getUpdateSchedulerBody = (
@@ -37,15 +38,13 @@ describe('Lightdash scheduler endpoints', () => {
     });
     it('Should create/update/delete chart scheduler', () => {
         const projectUuid = SEED_PROJECT.project_uuid;
-        cy.request(`${apiUrl}/projects/${projectUuid}/spaces-and-content`).then(
+        cy.request(`${apiUrl}/projects/${projectUuid}/charts`).then(
             (projectResponse) => {
-                const savedChart = projectResponse.body.results
-                    .find((s) => s.name === SEED_PROJECT.name)
-                    .queries.find(
-                        (s) =>
-                            s.name ===
-                            'How much revenue do we have per payment method?',
-                    );
+                const savedChart = projectResponse.body.results.find(
+                    (s) =>
+                        s.name ===
+                        'How much revenue do we have per payment method?',
+                );
 
                 // Create
                 cy.request<{ results: SchedulerAndTargets }>({

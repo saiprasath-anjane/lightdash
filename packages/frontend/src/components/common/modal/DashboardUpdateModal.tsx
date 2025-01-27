@@ -1,15 +1,16 @@
-import { Dashboard } from '@lightdash/common';
+import { type Dashboard } from '@lightdash/common';
 import {
     Button,
     Group,
     Modal,
-    ModalProps,
     Stack,
+    Textarea,
     TextInput,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { FC, useEffect } from 'react';
+import { useEffect, type FC } from 'react';
 import {
     useDashboardQuery,
     useUpdateDashboard,
@@ -27,7 +28,7 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
     onConfirm,
     ...modalProps
 }) => {
-    const { data: dashboard, isLoading } = useDashboardQuery(uuid);
+    const { data: dashboard, isInitialLoading } = useDashboardQuery(uuid);
     const { mutateAsync, isLoading: isUpdating } = useUpdateDashboard(uuid);
 
     const form = useForm<FormState>({
@@ -48,7 +49,7 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
         });
     }, [dashboard, setValues]);
 
-    if (isLoading || !dashboard) {
+    if (isInitialLoading || !dashboard) {
         return null;
     }
 
@@ -75,10 +76,12 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
                         {...form.getInputProps('name')}
                     />
 
-                    <TextInput
+                    <Textarea
                         label="Description"
                         placeholder="A few words to give your team some context"
                         disabled={isUpdating}
+                        autosize
+                        maxRows={3}
                         {...form.getInputProps('description')}
                     />
 

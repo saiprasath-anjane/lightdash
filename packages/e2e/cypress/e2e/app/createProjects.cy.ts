@@ -1,4 +1,8 @@
-import { ResultRow, SEED_PROJECT } from '@lightdash/common';
+import {
+    CustomDimensionType,
+    ResultRow,
+    SEED_PROJECT,
+} from '@lightdash/common';
 
 const warehouseConfig = {
     postgresSQL: {
@@ -151,12 +155,12 @@ const configureSnowflakeWarehouse = (
 
 const testCompile = (): Cypress.Chainable<string> => {
     // Compile
-    cy.findByText('Test & compile project').click();
+    cy.findByText('Test & deploy project').click();
     cy.contains('Step 1/3', { timeout: 60000 });
     cy.contains('Step 2/3', { timeout: 60000 });
     cy.contains('Successfully synced dbt project!', { timeout: 60000 });
 
-    cy.contains('selected 12 models');
+    cy.contains('selected 11 models');
     // Configure
     cy.contains('button', 'Save changes').click();
     cy.url().should('include', '/home', { timeout: 30000 });
@@ -218,6 +222,7 @@ const defaultRowValues = [
     '11',
     '224',
     '2020-08-10',
+    '33',
     '2020-08',
     '8',
     'August',
@@ -225,7 +230,9 @@ const defaultRowValues = [
     '3',
     'Q3',
     '2020',
-    '2,020',
+    '2020',
+    '23',
+    '44',
 ];
 
 const percentileRowValues = ['2020-08-11', '1,298', '828', '1,298', '1,717'];
@@ -287,6 +294,7 @@ const testTimeIntervalsResults = (
                 'events_timestamp_tz_day_of_month_num',
                 'events_timestamp_tz_day_of_year_num',
                 'events_timestamp_tz_week',
+                'events_timestamp_tz_week_num',
                 'events_timestamp_tz_month',
                 'events_timestamp_tz_month_num',
                 'events_timestamp_tz_month_name',
@@ -295,6 +303,8 @@ const testTimeIntervalsResults = (
                 'events_timestamp_tz_quarter_name',
                 'events_timestamp_tz_year',
                 'events_timestamp_tz_year_num',
+                'events_timestamp_tz_hour_of_day_num',
+                'events_timestamp_tz_minute_of_hour_num',
             ],
             metrics: [],
             filters: {},
@@ -327,12 +337,12 @@ const createCustomDimensionChart = (projectUuid) => {
         url: `${apiUrl}/projects/${projectUuid}/saved`,
         method: 'POST',
         body: {
-            name: 'How do payment methods vary across different amount ranges?"',
+            name: 'How do payment methods vary across different amount ranges?',
             description: 'Payment range by amount',
             tableName: 'payments',
             metricQuery: {
                 exploreName: 'payments',
-                dimensions: ['payments_payment_method'],
+                dimensions: ['payments_payment_method', 'amount_range'],
                 metrics: ['orders_total_order_amount'],
                 filters: {},
                 sorts: [
@@ -345,6 +355,7 @@ const createCustomDimensionChart = (projectUuid) => {
                     {
                         id: 'amount_range',
                         name: 'amount range',
+                        type: CustomDimensionType.BIN,
                         dimensionId: 'payments_amount',
                         binType: 'fixed_number',
                         binNumber: 5,
@@ -505,6 +516,7 @@ describe('Create projects', () => {
                 '12',
                 '225',
                 '2020-08-09',
+                '32',
                 '2020-08',
                 '8',
                 'August',
@@ -512,7 +524,9 @@ describe('Create projects', () => {
                 '3',
                 'Q3',
                 '2020',
-                '2,020',
+                '2020',
+                '7',
+                '58',
             ];
 
             testTimeIntervalsResults(projectUuid, bigqueryRowValues);
@@ -559,7 +573,7 @@ describe('Create projects', () => {
                 '3',
                 'Q3',
                 '2020',
-                '2,020',
+                '2020',
             ];
 
             testTimeIntervalsResults(projectUuid, trinoRowValues);
@@ -601,7 +615,7 @@ describe('Create projects', () => {
                 '3',
                 'Q3',
                 '2020',
-                '2,020',
+                '2020',
             ];
 
             testTimeIntervalsResults(projectUuid, databricksRowValues);
@@ -637,6 +651,7 @@ describe('Create projects', () => {
                 '12',
                 '225',
                 '2020-08-10',
+                '33',
                 '2020-08',
                 '8',
                 'August',
@@ -644,7 +659,9 @@ describe('Create projects', () => {
                 '3',
                 'Q3',
                 '2020',
-                '2,020',
+                '2020',
+                '7',
+                '58',
             ];
 
             testTimeIntervalsResults(projectUuid, snowflakeRowValues);

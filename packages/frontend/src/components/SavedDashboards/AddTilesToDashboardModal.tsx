@@ -1,7 +1,9 @@
 import {
-    DashboardChartTile,
+    assertUnreachable,
     DashboardTileTypes,
     getDefaultChartTileSize,
+    type DashboardBasicDetailsWithTileTypes,
+    type DashboardTile,
 } from '@lightdash/common';
 import {
     Anchor,
@@ -10,8 +12,11 @@ import {
     Modal,
     Select,
     Stack,
+    Text,
+    Textarea,
     TextInput,
     Title,
+    Tooltip,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import {
@@ -19,8 +24,17 @@ import {
     IconLayoutDashboard,
     IconPlus,
 } from '@tabler/icons-react';
-import { FC, useState } from 'react';
+import {
+    forwardRef,
+    useCallback,
+    useEffect,
+    useMemo,
+    useState,
+    type FC,
+} from 'react';
 import { v4 as uuid4 } from 'uuid';
+import { useSavedSemanticViewerChart } from '../../features/semanticViewer/api/hooks';
+import { useSavedSqlChart } from '../../features/sqlRunner/hooks/useSavedSqlCharts';
 import {
     appendNewTilesToBottom,
     useCreateMutation,
@@ -38,14 +52,42 @@ import MantineIcon from '../common/MantineIcon';
 interface AddTilesToDashboardModalProps {
     isOpen: boolean;
     projectUuid: string;
-    savedChartUuid: string;
+    uuid: string;
+    dashboardTileType: DashboardTileTypes;
     onClose?: () => void;
 }
+
+interface ItemProps extends React.ComponentPropsWithoutRef<'div'> {
+    label: string;
+    value: string;
+    disabled?: boolean;
+    spaceUuid: string;
+}
+
+const SelectItem = forwardRef<HTMLDivElement, ItemProps>(
+    ({ label, disabled, ...others }: ItemProps, ref) => (
+        <div ref={ref} {...others}>
+            <Tooltip
+                label={
+                    'Dashboard has charts created from a different semantic layer connection'
+                }
+                disabled={!disabled}
+                position="top-start"
+                withinPortal
+            >
+                <Text c={disabled ? 'dimmed' : 'gray.8'} fw={500} fz="xs">
+                    {label}
+                </Text>
+            </Tooltip>
+        </div>
+    ),
+);
 
 const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
     isOpen,
     projectUuid,
-    savedChartUuid,
+    uuid,
+    dashboardTileType,
     onClose,
 }) => {
     const [isCreatingNewDashboard, setIsCreatingNewDashboard] = useState(false);
@@ -53,38 +95,189 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
         useState<boolean>(false);
     const [isLoading, setIsLoading] = useState(false);
 
-    const { data: savedChart } = useSavedQuery({ id: savedChartUuid });
-    const { data: dashboards, isLoading: isLoadingDashboards } = useDashboards(
-        projectUuid,
-        {
-            staleTime: 0,
-            onSuccess: (data) => {
-                if (data.length === 0) {
-                    setIsCreatingNewDashboard(true);
-                }
-            },
+    const exploreChartQuery = useSavedQuery({
+        id: uuid,
+        useQueryOptions: {
+            enabled: dashboardTileType === DashboardTileTypes.SAVED_CHART,
         },
-        true, // includePrivateSpaces
+    });
+    const sqlChartQuery = useSavedSqlChart(
+        { projectUuid, uuid: uuid },
+        { enabled: dashboardTileType === DashboardTileTypes.SQL_CHART },
     );
-    const { data: spaces, isLoading: isLoadingSpaces } = useSpaceSummaries(
-        projectUuid,
-        true,
+    const semanticViewerChartQuery = useSavedSemanticViewerChart(
+        { projectUuid, findBy: { uuid } },
         {
+            enabled:
+                dashboardTileType === DashboardTileTypes.SEMANTIC_VIEWER_CHART,
+        },
+    );
+
+    const tile = useMemo<
+        | {
+              props: { uuid: string; spaceUuid: string };
+              payload: DashboardTile;
+          }
+        | undefined
+    >(() => {
+        switch (dashboardTileType) {
+            case DashboardTileTypes.SAVED_CHART:
+                if (!exploreChartQuery.isSuccess) return;
+
+                return {
+                    props: {
+                        uuid: exploreChartQuery.data.uuid,
+                        spaceUuid: exploreChartQuery.data.spaceUuid,
+                    },
+                    payload: {
+                        uuid: uuid4(),
+                        type: DashboardTileTypes.SAVED_CHART,
+                        properties: {
+                            savedChartUuid: exploreChartQuery.data.uuid,
+                        },
+                        tabUuid: undefined,
+                        ...getDefaultChartTileSize(
+                            exploreChartQuery.data.chartConfig?.type,
+                        ),
+                    },
+                };
+
+            case DashboardTileTypes.SQL_CHART:
+                if (!sqlChartQuery.isSuccess) return;
+
+                return {
+                    props: {
+                        uuid: sqlChartQuery.data.savedSqlUuid,
+                        spaceUuid: sqlChartQuery.data.space.uuid,
+                    },
+                    payload: {
+                        uuid: uuid4(),
+                        type: DashboardTileTypes.SQL_CHART,
+                        properties: {
+                            savedSqlUuid: sqlChartQuery.data.savedSqlUuid,
+                            chartName: sqlChartQuery.data.name,
+                        },
+                        tabUuid: undefined,
+                        ...getDefaultChartTileSize(
+                            sqlChartQuery.data.config?.type,
+                        ),
+                    },
+                };
+
+            case DashboardTileTypes.SEMANTIC_VIEWER_CHART:
+                if (!semanticViewerChartQuery.isSuccess) return;
+
+                return {
+                    props: {
+                        uuid: semanticViewerChartQuery.data
+                            .savedSemanticViewerChartUuid,
+                        spaceUuid: semanticViewerChartQuery.data.space.uuid,
+                    },
+                    payload: {
+                        uuid: uuid4(),
+                        type: DashboardTileTypes.SEMANTIC_VIEWER_CHART,
+                        properties: {
+                            chartName: semanticViewerChartQuery.data.name,
+                            savedSemanticViewerChartUuid:
+                                semanticViewerChartQuery.data
+                                    .savedSemanticViewerChartUuid,
+                        },
+                        tabUuid: undefined,
+                        ...getDefaultChartTileSize(
+                            semanticViewerChartQuery.data.config.type,
+                        ),
+                    },
+                };
+
+            case DashboardTileTypes.LOOM:
+            case DashboardTileTypes.MARKDOWN:
+                throw new Error(
+                    `not implemented for chart tile type: ${dashboardTileType}`,
+                );
+            default:
+                return assertUnreachable(
+                    dashboardTileType,
+                    `Unsupported chart tile type: ${dashboardTileType}`,
+                );
+        }
+    }, [
+        dashboardTileType,
+        exploreChartQuery,
+        sqlChartQuery,
+        semanticViewerChartQuery,
+    ]);
+
+    const { data: dashboards, isInitialLoading: isLoadingDashboards } =
+        useDashboards(
+            projectUuid,
+            {
+                staleTime: 0,
+                onSuccess: (data) => {
+                    if (data.length === 0) {
+                        setIsCreatingNewDashboard(true);
+                    }
+                },
+            },
+            true, // includePrivateSpaces
+        );
+
+    const { data: spaces, isInitialLoading: isLoadingSpaces } =
+        useSpaceSummaries(projectUuid, true, {
             staleTime: 0,
             onSuccess: (data) => {
                 if (data.length === 0) {
                     setIsCreatingNewSpace(true);
                 }
             },
+        });
+
+    const currentSpace = spaces?.find((s) => s.uuid === tile?.props.spaceUuid);
+
+    const isDashboardSelectItemDisabled = useCallback(
+        (dashboard: DashboardBasicDetailsWithTileTypes) => {
+            switch (dashboardTileType) {
+                case DashboardTileTypes.SAVED_CHART:
+                case DashboardTileTypes.SQL_CHART:
+                    return dashboard.tileTypes.includes(
+                        DashboardTileTypes.SEMANTIC_VIEWER_CHART,
+                    );
+                case DashboardTileTypes.SEMANTIC_VIEWER_CHART:
+                    return (
+                        dashboard.tileTypes.includes(
+                            DashboardTileTypes.SAVED_CHART,
+                        ) ||
+                        dashboard.tileTypes.includes(
+                            DashboardTileTypes.SQL_CHART,
+                        )
+                    );
+                case DashboardTileTypes.LOOM:
+                case DashboardTileTypes.MARKDOWN:
+                    return false;
+                default:
+                    return assertUnreachable(
+                        dashboardTileType,
+                        `Unknown tile type: ${dashboardTileType}`,
+                    );
+            }
         },
+        [dashboardTileType],
     );
-    const currentSpace = spaces?.find((s) => s.uuid === savedChart?.spaceUuid);
+
+    const dashboardSelectItems = useMemo(() => {
+        return (
+            dashboards?.map<ItemProps>((d) => ({
+                value: d.uuid,
+                label: d.name,
+                group: spaces?.find((s) => s.uuid === d.spaceUuid)?.name,
+                disabled: isDashboardSelectItemDisabled(d),
+                spaceUuid: d.spaceUuid, // ? Adding spaceUuid here for simplicity of selecting the default value in the select
+            })) ?? []
+        );
+    }, [dashboards, isDashboardSelectItemDisabled, spaces]);
 
     const form = useForm({
         initialValues: {
-            dashboardUuid:
-                dashboards?.find((d) => d.spaceUuid === currentSpace?.uuid)
-                    ?.uuid ?? '',
+            dashboardUuid: '',
             dashboardName: '',
             dashboardDescription: '',
             spaceUuid: currentSpace?.uuid ?? '',
@@ -112,7 +305,7 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
             spaceUuid,
             spaceName,
         }) => {
-            if (!savedChart) return;
+            if (!tile) return;
 
             setIsLoading(true);
 
@@ -125,45 +318,33 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                     });
                     spaceUuid = newSpace.uuid;
                 }
-                const newTile: DashboardChartTile = {
-                    uuid: uuid4(),
-                    type: DashboardTileTypes.SAVED_CHART,
-                    properties: {
-                        savedChartUuid: savedChart.uuid,
-                    },
-                    ...getDefaultChartTileSize(savedChart.chartConfig?.type),
-                };
 
                 if (isCreatingNewDashboard) {
                     await createDashboard({
                         name: dashboardName,
                         description: dashboardDescription,
                         spaceUuid: spaceUuid,
-                        tiles: [
-                            {
-                                uuid: uuid4(),
-                                type: DashboardTileTypes.SAVED_CHART,
-
-                                properties: {
-                                    savedChartUuid: savedChart.uuid,
-                                },
-                                ...getDefaultChartTileSize(
-                                    savedChart?.chartConfig.type,
-                                ),
-                            },
-                        ],
+                        tiles: [tile.payload],
+                        tabs: [],
                     });
                     onClose?.();
                 } else {
                     if (!selectedDashboard) {
                         throw new Error('Expected dashboard');
                     }
+                    const firstTab = selectedDashboard.tabs?.[0];
                     await updateDashboard({
                         name: selectedDashboard.name,
                         filters: selectedDashboard.filters,
                         tiles: appendNewTilesToBottom(selectedDashboard.tiles, [
-                            newTile,
+                            firstTab
+                                ? {
+                                      ...tile.payload,
+                                      tabUuid: firstTab.uuid,
+                                  }
+                                : tile.payload, // TODO: add to first tab by default, need ux to allow user select tab
                         ]),
+                        tabs: selectedDashboard.tabs,
                     });
                     onClose?.();
                 }
@@ -174,6 +355,20 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
             }
         },
     );
+
+    const defaultSelectValue = useMemo(
+        () =>
+            dashboardSelectItems.find(
+                (d) => d.spaceUuid === currentSpace?.uuid && !d.disabled,
+            )?.value,
+        [currentSpace?.uuid, dashboardSelectItems],
+    );
+
+    useEffect(() => {
+        if (defaultSelectValue && !form.values.dashboardUuid) {
+            form.setValues({ dashboardUuid: defaultSelectValue });
+        }
+    }, [defaultSelectValue, form]);
 
     if (isLoadingDashboards || !dashboards || isLoadingSpaces || !spaces) {
         return null;
@@ -194,7 +389,7 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                         size="lg"
                         color="green.8"
                     />
-                    <Title order={4}> Add chart to dashboard</Title>
+                    <Title order={4}>Add chart to dashboard</Title>
                 </Group>
             }
             withCloseButton
@@ -206,19 +401,7 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                             <Select
                                 id="select-dashboard"
                                 label="Select a dashboard"
-                                data={dashboards.map((d) => ({
-                                    value: d.uuid,
-                                    label: d.name,
-                                    group: spaces.find(
-                                        (s) => s.uuid === d.spaceUuid,
-                                    )?.name,
-                                }))}
-                                defaultValue={
-                                    dashboards.find(
-                                        (d) =>
-                                            d.spaceUuid === currentSpace?.uuid,
-                                    )?.uuid
-                                }
+                                data={dashboardSelectItems}
                                 searchable
                                 nothingFound="No matching dashboards found"
                                 filter={(value, dashboard) =>
@@ -228,6 +411,7 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                                 }
                                 withinPortal
                                 required
+                                itemComponent={SelectItem}
                                 {...form.getInputProps('dashboardUuid')}
                             />
                             <Anchor
@@ -249,10 +433,13 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                                 required
                                 {...form.getInputProps('dashboardName')}
                             />
-                            <TextInput
+                            <Textarea
                                 id="dashboard-description"
                                 label="Dashboard description"
                                 placeholder="A few words to give your team some context"
+                                autosize
+                                maxRows={3}
+                                style={{ overflowY: 'auto' }}
                                 {...form.getInputProps('dashboardDescription')}
                             />
                             {!isLoadingSpaces && !showNewSpaceInput ? (

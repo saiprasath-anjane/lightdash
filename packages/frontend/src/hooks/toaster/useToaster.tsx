@@ -1,30 +1,23 @@
-import { Button, ButtonProps, Stack } from '@mantine/core';
-import { NotificationProps, notifications } from '@mantine/notifications';
-import { PolymorphicComponentProps } from '@mantine/utils';
+import type { ApiErrorDetail } from '@lightdash/common';
+import { Button, Stack } from '@mantine/core';
+import { notifications, type NotificationProps } from '@mantine/notifications';
 import {
-    Icon,
     IconAlertTriangleFilled,
     IconCircleCheckFilled,
     IconInfoCircleFilled,
 } from '@tabler/icons-react';
-import MDEditor from '@uiw/react-md-editor';
-import { useCallback, useRef } from 'react';
+import MarkdownPreview from '@uiw/react-markdown-preview';
+import React, { useCallback, useRef, type ReactNode } from 'react';
+import rehypeExternalLinks from 'rehype-external-links';
 import { v4 as uuid } from 'uuid';
 import MantineIcon from '../../components/common/MantineIcon';
-
-type NotificationData = Omit<
-    Parameters<typeof notifications.show>[0],
-    'message' | 'key'
-> & {
-    key?: string;
-    subtitle?: string | JSX.Element;
-    action?: PolymorphicComponentProps<'button', ButtonProps> & {
-        icon?: Icon;
-    };
-};
+import ApiErrorDisplay from './ApiErrorDisplay';
+import MultipleToastBody from './MultipleToastBody';
+import { type NotificationData } from './types';
 
 const useToaster = () => {
     const openedKeys = useRef(new Set<string>());
+    const currentErrors = useRef<Record<string, NotificationData[]>>({});
 
     const showToast = useCallback(
         ({
@@ -58,9 +51,14 @@ const useToaster = () => {
                     subtitle || action ? (
                         <Stack spacing="xs" align="flex-start">
                             {typeof subtitle == 'string' ? (
-                                <MDEditor.Markdown
+                                <MarkdownPreview
                                     source={subtitle}
-                                    linkTarget="_blank"
+                                    rehypePlugins={[
+                                        [
+                                            rehypeExternalLinks,
+                                            { target: '_blank' },
+                                        ],
+                                    ]}
                                     style={{
                                         backgroundColor: 'transparent',
                                         color: toastColor ? 'white' : undefined,
@@ -68,7 +66,15 @@ const useToaster = () => {
                                     }}
                                 />
                             ) : (
-                                subtitle
+                                <div
+                                    style={{
+                                        color: toastColor ? 'white' : undefined,
+                                        fontSize: '12px',
+                                        width: '100%',
+                                    }}
+                                >
+                                    {subtitle}
+                                </div>
                             )}
 
                             {action && (
@@ -82,7 +88,9 @@ const useToaster = () => {
                                             <MantineIcon icon={action.icon} />
                                         ) : undefined
                                     }
-                                    onClick={(e) => {
+                                    onClick={(
+                                        e: React.MouseEvent<HTMLButtonElement>,
+                                    ) => {
                                         notifications.hide(key);
                                         action.onClick?.(e);
                                     }}
@@ -90,17 +98,20 @@ const useToaster = () => {
                             )}
                         </Stack>
                     ) : undefined,
-                onOpen: (props: NotificationProps) => {
-                    rest.onOpen?.(props);
-                    if (props.id) openedKeys.current.add(props.id);
-                },
                 onClose: (props: NotificationProps) => {
                     rest.onClose?.(props);
-                    if (props.id) openedKeys.current.delete(props.id);
+                    if (props.id) {
+                        openedKeys.current.delete(props.id);
+                        delete currentErrors.current[props.id];
+                    }
                 },
             };
 
             const method = openedKeys.current.has(key) ? 'update' : 'show';
+
+            if (method === 'show') {
+                openedKeys.current.add(key);
+            }
 
             notifications[method]({
                 id: key,
@@ -130,6 +141,30 @@ const useToaster = () => {
                 bg: 'red',
                 icon: <MantineIcon icon={IconAlertTriangleFilled} size="xl" />,
                 autoClose: 60000,
+                ...props,
+            });
+        },
+        [showToast],
+    );
+
+    const showToastApiError = useCallback(
+        (
+            props: Omit<NotificationData, 'subtitle'> & {
+                apiError: ApiErrorDetail;
+            },
+        ) => {
+            const title: ReactNode | undefined = props.title ?? 'Error';
+            const subtitle: ReactNode = (
+                <ApiErrorDisplay apiError={props.apiError} />
+            );
+
+            showToast({
+                color: 'red',
+                bg: 'red',
+                icon: <MantineIcon icon={IconAlertTriangleFilled} size="xl" />,
+                autoClose: 60000,
+                title,
+                subtitle,
                 ...props,
             });
         },
@@ -170,8 +205,111 @@ const useToaster = () => {
         [showToast],
     );
 
+    // This is used to update a multiple toast by key. It is called by
+    // addToastError and removeToastError, which pass different specific functions to
+    // update the error list
+    const updateToastError = useCallback(
+        ({
+            errorData,
+            updateErrorsFunction,
+            onCloseError,
+        }: {
+            errorData: NotificationData;
+            updateErrorsFunction: (
+                key: string,
+                errorData: NotificationData,
+            ) => void;
+            onCloseError: (data: NotificationData) => void;
+        }) => {
+            const {
+                // By default errors will be grouped under 'error-list'.
+                // Consumers can override this by passing a custom key.
+                key = 'error-list',
+                title,
+                subtitle,
+                apiError,
+                messageKey,
+                ...restProps
+            } = errorData;
+
+            if (!subtitle && !title && !apiError) return;
+
+            // Execute the specific error update function (add or remove)
+            updateErrorsFunction(key, errorData);
+
+            const hasMultipleErrors = currentErrors.current[key]?.length > 1;
+
+            const toastBody = hasMultipleErrors ? (
+                <MultipleToastBody
+                    title={title}
+                    toastsData={currentErrors.current[key]}
+                    onCloseError={(error) => onCloseError(error)}
+                />
+            ) : currentErrors.current[key][0].apiError ? (
+                <ApiErrorDisplay
+                    apiError={currentErrors.current[key][0].apiError}
+                />
+            ) : (
+                currentErrors.current[key][0].subtitle ||
+                currentErrors.current[key][0].title
+            );
+
+            showToastError({
+                key,
+                subtitle: toastBody,
+                title: hasMultipleErrors ? undefined : title,
+                ...restProps,
+            });
+        },
+        [showToastError],
+    );
+
+    const removeToastError = useCallback(
+        (notificationData: NotificationData) => {
+            updateToastError({
+                errorData: notificationData,
+                updateErrorsFunction: (key, errorData) => {
+                    currentErrors.current[key] = currentErrors.current[
+                        key
+                    ].filter((d) => d.messageKey !== errorData.messageKey);
+
+                    if (currentErrors.current[key].length === 0) {
+                        notifications.hide(key);
+                    }
+                },
+                onCloseError: removeToastError,
+            });
+        },
+        [updateToastError],
+    );
+
+    const addToastError = useCallback(
+        (notificationData: NotificationData) => {
+            updateToastError({
+                errorData: notificationData,
+                updateErrorsFunction: (key, errorData) => {
+                    if (!errorData) return;
+                    if (currentErrors.current[key]) {
+                        currentErrors.current[key].push({
+                            ...notificationData,
+                            messageKey: uuid(),
+                        });
+                    } else {
+                        currentErrors.current[key] = [
+                            { ...notificationData, messageKey: uuid() },
+                        ];
+                    }
+                },
+                onCloseError: removeToastError,
+            });
+        },
+        [removeToastError, updateToastError],
+    );
+
     return {
+        addToastError,
         showToastSuccess,
+        showToastApiError,
         showToastError,
         showToastInfo,
         showToastPrimary,

@@ -1,24 +1,25 @@
 import {
-    ResourceViewItem,
     ResourceViewItemType,
     wrapResourceView,
+    type ResourceViewItem,
 } from '@lightdash/common';
 import { ActionIcon, Group, Stack, TextInput } from '@mantine/core';
 import { IconChartBar, IconSearch, IconX } from '@tabler/icons-react';
 import Fuse from 'fuse.js';
-import { FC, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useMemo, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import LoadingState from '../components/common/LoadingState';
 import MantineIcon from '../components/common/MantineIcon';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import ResourceView from '../components/common/ResourceView';
-import { SortDirection } from '../components/common/ResourceView/ResourceViewList';
-import { useSavedCharts } from '../hooks/useSpaces';
-import { useApp } from '../providers/AppProvider';
+import { ResourceSortDirection } from '../components/common/ResourceView/types';
+import { useCharts } from '../hooks/useCharts';
+import useApp from '../providers/App/useApp';
 
 const MobileCharts: FC = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { isLoading, data: savedQueries = [] } = useSavedCharts(projectUuid);
+    const { isInitialLoading, data: savedQueries = [] } =
+        useCharts(projectUuid);
     const { user } = useApp();
     const cannotView = user.data?.ability?.cannot('view', 'SavedChart');
     const [search, setSearch] = useState<string>('');
@@ -41,7 +42,7 @@ const MobileCharts: FC = () => {
         return items;
     }, [savedQueries, search]);
 
-    if (isLoading && !cannotView) {
+    if (isInitialLoading && !cannotView) {
         return <LoadingState title="Loading charts" />;
     }
 
@@ -71,7 +72,7 @@ const MobileCharts: FC = () => {
             <ResourceView
                 items={visibleItems}
                 listProps={{
-                    defaultSort: { updatedAt: SortDirection.DESC },
+                    defaultSort: { updatedAt: ResourceSortDirection.DESC },
                     defaultColumnVisibility: {
                         space: false,
                         updatedAt: false,

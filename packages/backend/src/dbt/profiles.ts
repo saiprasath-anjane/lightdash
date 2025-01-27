@@ -1,4 +1,5 @@
 import {
+    AnyType,
     assertUnreachable,
     CreateWarehouseCredentials,
     WarehouseTypes,
@@ -14,7 +15,7 @@ const envVar = (v: string) => `LIGHTDASH_DBT_PROFILE_VAR_${v.toUpperCase()}`;
 const envVarReference = (v: string) => `{{ env_var('${envVar(v)}') }}`;
 
 type CredentialsTarget = {
-    target: Record<string, any>;
+    target: Record<string, AnyType>;
     environment: Record<string, string>;
     files?: Record<string, string>;
 };
@@ -41,6 +42,7 @@ const credentialsTarget = (
                             envVarReference(key),
                         ]),
                     ),
+                    execution_project: credentials.executionProject,
                 },
                 environment: Object.fromEntries(
                     Object.entries(credentials.keyfileContents).map(
@@ -194,10 +196,6 @@ export const profileFromCredentials = (
     );
 
     const profile = yaml.dump({
-        config: {
-            partial_parse: false,
-            send_anonymous_usage_stats: false,
-        },
         [LIGHTDASH_PROFILE_NAME]: {
             target: targetName,
             outputs: {

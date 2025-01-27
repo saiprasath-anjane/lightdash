@@ -1,5 +1,6 @@
 import { CartesianSeriesType, getItemMap } from '@lightdash/common';
-import { renderHook } from '@testing-library/react-hooks';
+import { renderHook } from '@testing-library/react';
+import { describe, expect, test } from 'vitest';
 import useCartesianChartConfig from './useCartesianChartConfig';
 import {
     existingMixedSeries,
@@ -190,8 +191,10 @@ describe('useCartesianChartConfig', () => {
 
         const series = result.current.validConfig!.eChartsConfig.series!;
 
+        expect(series.length).toBeGreaterThan(0);
         series.forEach((serie) => expect(serie.yAxisIndex).toBe(0));
     });
+
     test('should set undefined yAxisIndex to 0', () => {
         const seriesFromOldChart = [
             {

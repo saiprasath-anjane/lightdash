@@ -6,14 +6,17 @@ import IDBSQLSession from '@databricks/sql/dist/contracts/IDBSQLSession';
 import IOperation from '@databricks/sql/dist/contracts/IOperation';
 import { TTypeId as DatabricksDataTypes } from '@databricks/sql/thrift/TCLIService_types';
 import {
+    AnyType,
     CreateDatabricksCredentials,
     DimensionType,
+    getErrorMessage,
     Metric,
     MetricType,
     ParseError,
     SupportedDbtAdapter,
     WarehouseConnectionError,
     WarehouseQueryError,
+    WarehouseResults,
 } from '@lightdash/common';
 import { WarehouseCatalog } from '../types';
 import WarehouseBaseClient from './WarehouseBaseClient';
@@ -121,6 +124,27 @@ const normaliseDatabricksType = (type: string): DatabricksTypes => {
     return match[0] as DatabricksTypes;
 };
 
+const DATABRICKS_QUERIES_BATCH_SIZE = 100;
+
+async function processPromisesInBatches<T, R>(
+    items: Array<T>,
+    batchSize: number,
+    fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+    let results: R[] = [];
+    /* eslint-disable no-await-in-loop */
+    for (let start = 0; start < items.length; start += batchSize) {
+        const end =
+            start + batchSize > items.length ? items.length : start + batchSize;
+        const slicedResults = await Promise.all(
+            items.slice(start, end).map(fn),
+        );
+        results = [...results, ...slicedResults];
+    }
+    /* eslint-enable no-await-in-loop */
+    return results;
+}
+
 const mapFieldType = (type: string): DimensionType => {
     const normalizedType = normaliseDatabricksType(type);
 
@@ -192,8 +216,8 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                 initialCatalog: this.catalog,
                 initialSchema: this.schema,
             });
-        } catch (e: any) {
-            throw new WarehouseConnectionError(e.message);
+        } catch (e: AnyType) {
+            throw new WarehouseConnectionError(getErrorMessage(e));
         }
 
         return {
@@ -205,23 +229,43 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
         };
     }
 
-    async runQuery(sql: string, tags?: Record<string, string>) {
+    async streamQuery(
+        sql: string,
+        streamCallback: (data: WarehouseResults) => void,
+        options: {
+            values?: AnyType[];
+            tags?: Record<string, string>;
+            timezone?: string;
+        },
+    ): Promise<void> {
         const { session, close } = await this.getSession();
         let query: IOperation | null = null;
 
         let alteredQuery = sql;
-        if (tags) {
-            alteredQuery = `${alteredQuery}\n-- ${JSON.stringify(tags)}`;
+        if (options?.tags) {
+            alteredQuery = `${alteredQuery}\n-- ${JSON.stringify(
+                options?.tags,
+            )}`;
         }
 
         try {
+            if (options?.timezone) {
+                console.debug(
+                    `Setting databricks timezone to ${options?.timezone}`,
+                );
+                await session.executeStatement(
+                    `SET TIME ZONE '${options?.timezone}'`,
+                    {
+                        runAsync: false,
+                    },
+                );
+            }
             query = await session.executeStatement(alteredQuery, {
                 runAsync: true,
+                ordinalParameters: options?.values,
             });
 
-            const result = await query.fetchAll();
             const schema = await query.getSchema();
-
             const fields = (schema?.columns ?? []).reduce<
                 Record<string, { type: DimensionType }>
             >(
@@ -237,12 +281,25 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                 {},
             );
 
-            return { fields, rows: result };
-        } catch (e: any) {
-            throw new WarehouseQueryError(e.message);
+            do {
+                // eslint-disable-next-line no-await-in-loop
+                const chunk = await query.fetchChunk();
+                streamCallback({ fields, rows: chunk });
+                // eslint-disable-next-line no-await-in-loop
+            } while (await query.hasMoreRows());
+        } catch (e: AnyType) {
+            throw new WarehouseQueryError(getErrorMessage(e));
         } finally {
-            if (query) await query.close();
-            await close();
+            try {
+                if (query) await query.close();
+                await close();
+            } catch (e: AnyType) {
+                // Only console error. Don't allow close errors to override the original error
+                console.error(
+                    'Error closing Databricks session on streamQuery',
+                    e,
+                );
+            }
         }
     }
 
@@ -257,27 +314,45 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
         let results: SchemaResult[][];
 
         try {
-            const promises = requests.map(async (request) => {
-                let query: IOperation | null = null;
-                try {
-                    query = await session.getColumns({
-                        catalogName: request.database,
-                        schemaName: request.schema,
-                        tableName: request.table,
-                    });
-
-                    const result = (await query.fetchAll()) as SchemaResult[];
-
-                    return result;
-                } catch (e: any) {
-                    throw new WarehouseQueryError(e.message);
-                } finally {
-                    if (query) query.close();
-                }
-            });
-            results = await Promise.all(promises);
+            results = await processPromisesInBatches(
+                requests,
+                DATABRICKS_QUERIES_BATCH_SIZE,
+                async (request) => {
+                    let query: IOperation | null = null;
+                    try {
+                        query = await session.getColumns({
+                            catalogName: request.database,
+                            schemaName: request.schema,
+                            tableName: request.table,
+                        });
+                        return (await query.fetchAll()) as SchemaResult[];
+                    } catch (e: AnyType) {
+                        throw new WarehouseQueryError(getErrorMessage(e));
+                    } finally {
+                        try {
+                            if (query) await query.close();
+                        } catch (e: AnyType) {
+                            // Only console error. Don't allow close errors to override the original error
+                            console.error(
+                                'Error closing Databricks query on getCatalog',
+                                e,
+                            );
+                        }
+                    }
+                },
+            );
+        } catch (e: AnyType) {
+            throw new WarehouseQueryError(getErrorMessage(e));
         } finally {
-            await close();
+            try {
+                await close();
+            } catch (e: AnyType) {
+                // Only console error. Don't allow close errors to override the original error
+                console.error(
+                    'Error closing Databricks session on getCatalog',
+                    e,
+                );
+            }
         }
 
         const catalog = this.catalog || 'DEFAULT';
@@ -298,10 +373,6 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
             },
             { [catalog]: {} } as WarehouseCatalog,
         );
-    }
-
-    getFieldQuoteChar() {
-        return '`';
     }
 
     getStringQuoteChar() {
@@ -325,5 +396,69 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
             default:
                 return super.getMetricSql(sql, metric);
         }
+    }
+
+    async getAllTables() {
+        const query = `
+            SELECT table_catalog, table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_type = 'MANAGED' 
+            ORDER BY 1,2,3
+        `;
+        const { rows } = await this.runQuery(query, {}, undefined, undefined);
+        return rows.map((row) => ({
+            database: row.table_catalog,
+            schema: row.table_schema,
+            table: row.table_name,
+        }));
+    }
+
+    async getTables(
+        schema?: string,
+        tags?: Record<string, string>,
+    ): Promise<WarehouseCatalog> {
+        const schemaFilter = schema ? `AND table_schema = ?` : '';
+        const query = `
+            SELECT table_catalog, table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_type = 'BASE TABLE' 
+            ${schemaFilter}
+            ORDER BY 1,2,3
+        `;
+        const { rows } = await this.runQuery(
+            query,
+            tags,
+            undefined,
+            schema ? [schema] : undefined,
+        );
+        return this.parseWarehouseCatalog(rows, mapFieldType);
+    }
+
+    async getFields(
+        tableName: string,
+        schema?: string,
+        database?: string,
+        tags?: Record<string, string>,
+    ): Promise<WarehouseCatalog> {
+        const query = `
+            SELECT table_catalog,
+                   table_schema,
+                   table_name,
+                   column_name, 
+                   data_type
+            FROM information_schema.columns
+            WHERE table_name = ?
+            ${schema ? 'AND table_schema = ?' : ''}
+            ${database ? 'AND table_catalog = ?' : ''}
+        `;
+        const values = [tableName];
+        if (schema) {
+            values.push(schema);
+        }
+        if (database) {
+            values.push(database);
+        }
+        const { rows } = await this.runQuery(query, tags, undefined, values);
+        return this.parseWarehouseCatalog(rows, mapFieldType);
     }
 }

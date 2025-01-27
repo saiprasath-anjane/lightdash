@@ -4,13 +4,13 @@ import {
     Group,
     List,
     Modal,
-    ModalProps,
     Stack,
     Text,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { IconTrash } from '@tabler/icons-react';
-import { FC } from 'react';
+import { type FC } from 'react';
 import {
     useDashboardDeleteMutation,
     useDashboardQuery,
@@ -27,11 +27,11 @@ const DashboardDeleteModal: FC<DashboardDeleteModalProps> = ({
     onConfirm,
     ...modalProps
 }) => {
-    const { data: dashboard, isLoading } = useDashboardQuery(uuid);
+    const { data: dashboard, isInitialLoading } = useDashboardQuery(uuid);
     const { mutateAsync: deleteDashboard, isLoading: isDeleting } =
         useDashboardDeleteMutation();
 
-    if (isLoading || !dashboard) {
+    if (isInitialLoading || !dashboard) {
         return null;
     }
 

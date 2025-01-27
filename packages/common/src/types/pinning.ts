@@ -1,9 +1,9 @@
 import {
-    ResourceViewChartItem,
-    ResourceViewDashboardItem,
-    ResourceViewItem,
-    ResourceViewItemType,
-    ResourceViewSpaceItem,
+    type ResourceViewChartItem,
+    type ResourceViewDashboardItem,
+    type ResourceViewItem,
+    type ResourceViewItemType,
+    type ResourceViewSpaceItem,
 } from './resourceViewItem';
 
 export type PinnedList = {
@@ -95,3 +95,15 @@ export type ApiPinnedItems = {
 export type PinnedItems = Array<
     ResourceViewDashboardItem | ResourceViewChartItem | ResourceViewSpaceItem
 >;
+
+export type TogglePinnedItemInfo = {
+    pinnedListUuid: string;
+    projectUuid: string;
+    spaceUuid: string;
+    isPinned: boolean;
+};
+
+export type ApiTogglePinnedItem = {
+    status: 'ok';
+    results: TogglePinnedItemInfo;
+};

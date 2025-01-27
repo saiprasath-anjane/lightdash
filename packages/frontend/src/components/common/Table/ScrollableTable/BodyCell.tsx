@@ -1,22 +1,21 @@
-import { ResultRow } from '@lightdash/common';
-import { getHotkeyHandler, useDisclosure } from '@mantine/hooks';
-import { Cell } from '@tanstack/react-table';
-import copy from 'copy-to-clipboard';
-import { FC, useCallback, useEffect, useRef, useState } from 'react';
-import { CSSProperties } from 'styled-components';
+import { type RawResultRow, type ResultRow } from '@lightdash/common';
+import { getHotkeyHandler, useClipboard, useDisclosure } from '@mantine/hooks';
+import { type Cell } from '@tanstack/react-table';
+import { useCallback, useEffect, useRef, useState, type FC } from 'react';
+import { type CSSProperties } from 'styled-components';
 import useToaster from '../../../../hooks/toaster/useToaster';
 import { Td } from '../Table.styles';
-import { CellContextMenuProps } from '../types';
+import { type CellContextMenuProps } from '../types';
 import CellMenu from './CellMenu';
 import CellTooltip from './CellTooltip';
 import RichBodyCell from './RichBodyCell';
 
 interface CommonBodyCellProps {
-    cell: Cell<ResultRow, unknown>;
+    cell: Cell<ResultRow, unknown> | Cell<RawResultRow, unknown>;
     index: number;
     isNumericItem: boolean;
     hasData: boolean;
-    cellContextMenu?: FC<CellContextMenuProps>;
+    cellContextMenu?: FC<React.PropsWithChildren<CellContextMenuProps>>;
     className?: string;
     style?: CSSProperties;
     backgroundColor?: string;
@@ -26,7 +25,7 @@ interface CommonBodyCellProps {
     minimal?: boolean;
 }
 
-const BodyCell: FC<CommonBodyCellProps> = ({
+const BodyCell: FC<React.PropsWithChildren<CommonBodyCellProps>> = ({
     cell,
     children,
     className,
@@ -43,13 +42,14 @@ const BodyCell: FC<CommonBodyCellProps> = ({
 }) => {
     const elementRef = useRef<HTMLTableCellElement>(null);
     const { showToastSuccess } = useToaster();
+    const { copy } = useClipboard();
 
     const [isCopying, setCopying] = useState(false);
     const [isMenuOpen, { toggle: toggleMenu }] = useDisclosure(false);
     const [isTooltipOpen, { open: openTooltip, close: closeTooltip }] =
         useDisclosure(false);
 
-    const canHaveMenu = !!cellContextMenu && hasData && !minimal;
+    const canHaveMenu = !!cellContextMenu && hasData;
     const canHaveTooltip = !!tooltipContent && !minimal;
 
     const shouldRenderMenu = canHaveMenu && isMenuOpen && elementRef.current;
@@ -74,7 +74,7 @@ const BodyCell: FC<CommonBodyCellProps> = ({
             }
             return true;
         });
-    }, [cell, isMenuOpen, showToastSuccess]);
+    }, [isMenuOpen, cell, copy, showToastSuccess]);
 
     useEffect(() => {
         const handleKeyDown = getHotkeyHandler([['mod+C', handleCopy]]);
@@ -117,7 +117,9 @@ const BodyCell: FC<CommonBodyCellProps> = ({
                 <CellMenu
                     cell={cell as Cell<ResultRow, ResultRow[0]>}
                     menuItems={cellContextMenu}
-                    elementBounds={elementRef.current.getBoundingClientRect()}
+                    elementBounds={
+                        elementRef.current?.getBoundingClientRect() ?? null
+                    }
                     onClose={toggleMenu}
                 />
             ) : null}
@@ -126,7 +128,9 @@ const BodyCell: FC<CommonBodyCellProps> = ({
                 <CellTooltip
                     position="top"
                     label={tooltipContent}
-                    elementBounds={elementRef.current.getBoundingClientRect()}
+                    elementBounds={
+                        elementRef.current?.getBoundingClientRect() ?? null
+                    }
                 />
             ) : null}
         </>

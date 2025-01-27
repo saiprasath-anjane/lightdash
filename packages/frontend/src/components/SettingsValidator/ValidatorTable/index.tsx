@@ -2,9 +2,9 @@ import {
     isChartValidationError,
     isDashboardValidationError,
     isTableValidationError,
-    ValidationErrorChartResponse,
-    ValidationErrorDashboardResponse,
-    ValidationResponse,
+    type ValidationErrorChartResponse,
+    type ValidationErrorDashboardResponse,
+    type ValidationResponse,
 } from '@lightdash/common';
 import {
     ActionIcon,
@@ -19,8 +19,15 @@ import {
 } from '@mantine/core';
 import { mergeRefs, useHover } from '@mantine/hooks';
 import { IconLayoutDashboard, IconTable, IconX } from '@tabler/icons-react';
-import { createRef, FC, forwardRef, RefObject, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import {
+    createRef,
+    forwardRef,
+    useMemo,
+    type FC,
+    type ReactNode,
+    type RefObject,
+} from 'react';
+import { useLocation } from 'react-router';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
 import { useDeleteValidation } from '../../../hooks/validation/useValidation';
 import MantineIcon from '../../common/MantineIcon';
@@ -51,7 +58,7 @@ const isDeleted = (validationError: ValidationResponse) =>
 
 const Icon = ({ validationError }: { validationError: ValidationResponse }) => {
     if (isChartValidationError(validationError))
-        return <ChartIcon chartType={validationError.chartType} />;
+        return <ChartIcon chartKind={validationError.chartKind} />;
     if (isDashboardValidationError(validationError))
         return <IconBox icon={IconLayoutDashboard} color="green.8" />;
     return <IconBox icon={IconTable} color="indigo.6" />;
@@ -67,14 +74,6 @@ const getErrorName = (validationError: ValidationResponse) => {
         return validationError.name ?? 'Table';
 };
 
-const handleOnValidationErrorClick = (
-    projectUuid: string,
-    validationError: ValidationResponse,
-) => {
-    const link = getLinkToResource(validationError, projectUuid);
-    if (link) window.open(link, '_blank');
-};
-
 const getViews = (
     validationError:
         | ValidationErrorChartResponse
@@ -83,6 +82,31 @@ const getViews = (
     if ('chartViews' in validationError) return validationError.chartViews;
     if ('dashboardViews' in validationError)
         return validationError.dashboardViews;
+};
+
+const AnchorToResource: FC<{
+    validationError: ValidationResponse;
+    projectUuid: string;
+    children: ReactNode;
+}> = ({ validationError, projectUuid, children }) => {
+    return (
+        <Anchor
+            href={getLinkToResource(validationError, projectUuid)}
+            target="_blank"
+            sx={{
+                color: 'unset',
+                ':hover': {
+                    color: 'unset',
+                    textDecoration: 'none',
+                },
+            }}
+            onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                e.stopPropagation();
+            }}
+        >
+            {children}
+        </Anchor>
+    );
 };
 
 const TableValidationItem = forwardRef<
@@ -97,26 +121,11 @@ const TableValidationItem = forwardRef<
     const { hovered, ref: isHoveredRef } = useHover<HTMLTableRowElement>();
 
     return (
-        <tr
-            ref={mergeRefs(ref, isHoveredRef)}
-            onClick={() =>
-                handleOnValidationErrorClick(projectUuid, validationError)
-            }
-        >
+        <tr ref={mergeRefs(ref, isHoveredRef)}>
             <td>
-                <Anchor
-                    href={getLinkToResource(validationError, projectUuid)}
-                    target="_blank"
-                    sx={{
-                        color: 'unset',
-                        ':hover': {
-                            color: 'unset',
-                            textDecoration: 'none',
-                        },
-                    }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                    }}
+                <AnchorToResource
+                    validationError={validationError}
+                    projectUuid={projectUuid}
                 >
                     <Flex gap="sm" align="center">
                         <Icon validationError={validationError} />
@@ -163,17 +172,24 @@ const TableValidationItem = forwardRef<
                                 )}
                         </Stack>
                     </Flex>
-                </Anchor>
+                </AnchorToResource>
             </td>
             <td>
-                <ErrorMessage validationError={validationError} />
+                <AnchorToResource
+                    validationError={validationError}
+                    projectUuid={projectUuid}
+                >
+                    <ErrorMessage validationError={validationError} />
+                </AnchorToResource>
             </td>
             <td>
                 <Tooltip label="Dismiss error" position="top">
                     <Box w={24}>
                         {hovered && (
                             <ActionIcon
-                                onClick={(e) => {
+                                onClick={(
+                                    e: React.MouseEvent<HTMLButtonElement>,
+                                ) => {
                                     deleteValidation(
                                         validationError.validationId,
                                     );
@@ -201,15 +217,16 @@ export const ValidatorTable: FC<{
     const { cx, classes } = useTableStyles();
     const { colors } = useMantineTheme();
 
-    const location = useLocation<{ validationId: number }>();
+    const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const validationId = searchParams.get('validationId');
     const refs = useMemo(
         () =>
             data.reduce((acc, value) => {
-                acc[value.validationId.toString()] = createRef();
+                acc[value.validationId.toString()] =
+                    createRef<HTMLTableRowElement | null>();
                 return acc;
-            }, {} as { [key: string]: RefObject<HTMLTableRowElement> }),
+            }, {} as { [key: string]: RefObject<HTMLTableRowElement | null> }),
         [data],
     );
 

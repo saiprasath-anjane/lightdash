@@ -5,21 +5,32 @@ import {
     getCustomLabelsFromTableConfig,
     NotFoundError,
 } from '@lightdash/common';
-import { Alert, Box, Group, Stack, Tabs } from '@mantine/core';
+import {
+    Alert,
+    Badge,
+    Box,
+    Group,
+    Stack,
+    Tabs,
+    Text,
+    Tooltip,
+} from '@mantine/core';
 import { getHotkeyHandler } from '@mantine/hooks';
-import { IconAlertCircle } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { NavLink, useParams } from 'react-router';
 import { useMount } from 'react-use';
 
+import { IconAlertCircle } from '@tabler/icons-react';
 import { downloadCsvFromSqlRunner } from '../api/csv';
-import { ChartDownloadMenu } from '../components/ChartDownload';
-import CollapsableCard from '../components/common/CollapsableCard';
+import ChartDownloadMenu from '../components/common/ChartDownload/ChartDownloadMenu';
+import CollapsableCard from '../components/common/CollapsableCard/CollapsableCard';
+import MantineIcon from '../components/common/MantineIcon';
 import Page from '../components/common/Page/Page';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import ShareShortLinkButton from '../components/common/ShareShortLinkButton';
 import CatalogTree from '../components/common/SqlRunner/CatalogTree';
 import DownloadSqlCsvButton from '../components/DownloadSqlCsvButton';
+import { ItemDetailProvider } from '../components/Explorer/ExploreTree/TableTree/ItemDetailProvider';
 import VisualizationConfigPanel from '../components/Explorer/VisualizationCard/VisualizationConfigPanel';
 import VisualizationCardOptions from '../components/Explorer/VisualizationCardOptions';
 import ForbiddenPanel from '../components/ForbiddenPanel';
@@ -33,8 +44,8 @@ import SqlRunnerResultsTable from '../components/SqlRunner/SqlRunnerResultsTable
 import { useOrganization } from '../hooks/organization/useOrganization';
 import { useProjectCatalog } from '../hooks/useProjectCatalog';
 import {
-    ProjectCatalogTreeNode,
     useProjectCatalogTree,
+    type ProjectCatalogTreeNode,
 } from '../hooks/useProjectCatalogTree';
 import { useSqlQueryMutation } from '../hooks/useSqlQuery';
 import useSqlQueryVisualization from '../hooks/useSqlQueryVisualization';
@@ -42,8 +53,8 @@ import {
     useSqlRunnerRoute,
     useSqlRunnerUrlState,
 } from '../hooks/useSqlRunnerRoute';
-import { useApp } from '../providers/AppProvider';
-import { TrackSection } from '../providers/TrackingProvider';
+import useApp from '../providers/App/useApp';
+import { TrackSection } from '../providers/Tracking/TrackingProvider';
 import { SectionName } from '../types/Events';
 
 const generateBasicSqlQuery = (table: string) =>
@@ -56,13 +67,20 @@ enum SqlRunnerCards {
     RESULTS = 'RESULTS',
 }
 
+const NEW_SQL_RUNNER_RELEASE_DATE = new Date('2024-09-02');
+const NEW_SQL_RUNNER_MIGRATION_DEADLINE = new Date(
+    NEW_SQL_RUNNER_RELEASE_DATE.setDate(
+        NEW_SQL_RUNNER_RELEASE_DATE.getDate() + 30,
+    ),
+).toLocaleDateString();
+
 const SqlRunnerPage = () => {
     const { user, health } = useApp();
     const { data: org } = useOrganization();
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const initialState = useSqlRunnerUrlState();
     const sqlQueryMutation = useSqlQueryMutation();
-    const { isLoading: isCatalogLoading, data: catalogData } =
+    const { isInitialLoading: isCatalogLoading, data: catalogData } =
         useProjectCatalog();
 
     const [sql, setSql] = useState<string>(initialState?.sqlRunner?.sql || '');
@@ -95,6 +113,15 @@ const SqlRunnerPage = () => {
         initialState: initialState?.createSavedChart,
         sqlQueryMutation,
     });
+
+    const maxLimit = useMemo(
+        () => health.data?.query.maxLimit || 5000,
+        [health],
+    );
+
+    const showLimitReachedWarning = useMemo(() => {
+        return resultsData && resultsData.rows.length >= maxLimit;
+    }, [resultsData, maxLimit]);
 
     const sqlRunnerState = useMemo(
         () => ({
@@ -150,7 +177,7 @@ const SqlRunnerPage = () => {
     }
 
     const getCsvLink = async () => {
-        if (sql) {
+        if (sql && projectUuid) {
             const customLabels = getCustomLabelsFromTableConfig(
                 createSavedChart?.chartConfig.config,
             );
@@ -172,14 +199,13 @@ const SqlRunnerPage = () => {
         throw new NotFoundError('no SQL query defined');
     };
 
-    if (health.isLoading || !health.data) {
+    if (health.isInitialLoading || !health.data) {
         return null;
     }
 
     return (
         <Page
             title="SQL Runner"
-            withSidebarFooter
             withFullHeight
             withPaddedContent
             sidebar={
@@ -211,21 +237,13 @@ const SqlRunnerPage = () => {
                             ) : (
                                 <Stack sx={{ overflowY: 'auto', flex: 1 }}>
                                     <Box>
-                                        <CatalogTree
-                                            nodes={catalogTree}
-                                            onSelect={handleTableSelect}
-                                        />
+                                        <ItemDetailProvider>
+                                            <CatalogTree
+                                                nodes={catalogTree}
+                                                onSelect={handleTableSelect}
+                                            />
+                                        </ItemDetailProvider>
                                     </Box>
-
-                                    <Alert
-                                        icon={<IconAlertCircle />}
-                                        title="Tables missing?"
-                                        color="blue"
-                                        sx={{ flexShrink: 0 }}
-                                    >
-                                        Currently we only display tables that
-                                        are declared in the dbt project.
-                                    </Alert>
                                 </Stack>
                             )}
                         </Tabs.Panel>
@@ -235,9 +253,49 @@ const SqlRunnerPage = () => {
         >
             <TrackSection name={SectionName.EXPLORER_TOP_BUTTONS}>
                 <Group position="apart">
-                    <RefreshDbtButton />
+                    <Box>
+                        <RefreshDbtButton />
+                    </Box>
+
+                    <Alert
+                        icon={<IconAlertCircle />}
+                        title="Important Notice"
+                        color="yellow"
+                        fw={500}
+                    >
+                        Please migrate your SQL queries/charts to the{' '}
+                        <NavLink to="sql-runner">new SQL Runner</NavLink> by{' '}
+                        {NEW_SQL_RUNNER_MIGRATION_DEADLINE}.
+                        <br />
+                        <Text fz="xs">
+                            Contact customer support if you have any questions.
+                        </Text>
+                    </Alert>
 
                     <Group spacing="sm">
+                        {showLimitReachedWarning && (
+                            <Tooltip
+                                width={400}
+                                label={`A limit of ${maxLimit} rows as been applied to prevent performance issues. Reach to your admin or support if you need to increase this limit.`}
+                                multiline
+                                position={'bottom'}
+                            >
+                                <Badge
+                                    leftSection={
+                                        <MantineIcon
+                                            icon={IconAlertCircle}
+                                            size={'sm'}
+                                        />
+                                    }
+                                    color="yellow"
+                                    variant="outline"
+                                    tt="none"
+                                    sx={{ cursor: 'help' }}
+                                >
+                                    Results may be incomplete
+                                </Badge>
+                            </Tooltip>
+                        )}
                         <RunSqlQueryButton
                             onSubmit={handleSubmit}
                             isLoading={isLoading}
@@ -266,7 +324,7 @@ const SqlRunnerPage = () => {
                     colorPalette={org?.chartColors ?? ECHARTS_DEFAULT_COLORS}
                 >
                     <CollapsableCard
-                        title="Charts"
+                        title="Chart"
                         rightHeaderElement={
                             expandedCards.get(SqlRunnerCards.CHART) && (
                                 <>
@@ -280,9 +338,11 @@ const SqlRunnerPage = () => {
                                             disabled={!sql}
                                         />
                                     )}
-                                    <ChartDownloadMenu
-                                        projectUuid={projectUuid}
-                                    />
+                                    {projectUuid && (
+                                        <ChartDownloadMenu
+                                            projectUuid={projectUuid}
+                                        />
+                                    )}
                                 </>
                             )
                         }

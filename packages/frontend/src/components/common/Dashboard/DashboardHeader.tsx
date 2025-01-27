@@ -1,5 +1,5 @@
 import { subject } from '@casl/ability';
-import { Dashboard, SpaceSummary, UpdatedByUser } from '@lightdash/common';
+import { type Dashboard, type SpaceSummary } from '@lightdash/common';
 import {
     ActionIcon,
     Box,
@@ -14,31 +14,42 @@ import {
     Tooltip,
 } from '@mantine/core';
 import {
+    IconArrowsMaximize,
+    IconArrowsMinimize,
     IconCheck,
     IconChevronRight,
     IconCopy,
+    IconDatabaseExport,
     IconDots,
     IconFolder,
     IconFolderPlus,
     IconFolders,
     IconInfoCircle,
     IconPencil,
+    IconPin,
+    IconPinnedOff,
     IconPlus,
     IconSend,
     IconTrash,
     IconUpload,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import { useEffect, useState } from 'react';
-import { useHistory, useLocation, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { useLocation, useParams } from 'react-router';
 import { useToggle } from 'react-use';
+import { PromotionConfirmDialog } from '../../../features/promotion/components/PromotionConfirmDialog';
+import {
+    usePromoteDashboardDiffMutation,
+    usePromoteDashboardMutation,
+} from '../../../features/promotion/hooks/usePromoteDashboard';
 import { DashboardSchedulersModal } from '../../../features/scheduler';
 import { getSchedulerUuidFromUrlParams } from '../../../features/scheduler/utils';
-import { useApp } from '../../../providers/AppProvider';
-import { useTracking } from '../../../providers/TrackingProvider';
+import { useProject } from '../../../hooks/useProject';
+import useApp from '../../../providers/App/useApp';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import AddTileButton from '../../DashboardTiles/AddTileButton';
-import ShareLinkButton from '../../ShareLinkButton';
+import { Can } from '../Authorization';
 import MantineIcon from '../MantineIcon';
 import DashboardUpdateModal from '../modal/DashboardUpdateModal';
 import PageHeader from '../Page/PageHeader';
@@ -49,24 +60,24 @@ import {
 import SpaceAndDashboardInfo from '../PageHeader/SpaceAndDashboardInfo';
 import { UpdatedInfo } from '../PageHeader/UpdatedInfo';
 import ViewInfo from '../PageHeader/ViewInfo';
-import SpaceActionModal, { ActionType } from '../SpaceActionModal';
+import SpaceActionModal from '../SpaceActionModal';
+import { ActionType } from '../SpaceActionModal/types';
 import { DashboardRefreshButton } from './DashboardRefreshButton';
+import ShareLinkButton from './ShareLinkButton';
 
 type DashboardHeaderProps = {
     spaces?: SpaceSummary[];
-    dashboardDescription?: string;
-    dashboardName: string;
-    dashboardSpaceName?: string;
-    dashboardSpaceUuid?: string;
-    dashboardUpdatedAt: Date;
-    dashboardViews: number;
-    dashboardFirstViewedAt: Date | string | null;
-    dashboardUpdatedByUser?: UpdatedByUser;
+    dashboard: Dashboard;
     organizationUuid?: string;
     hasDashboardChanged: boolean;
+    hasNewSemanticLayerChart: boolean;
     isEditMode: boolean;
     isSaving: boolean;
+    isFullscreen: boolean;
+    isPinned: boolean;
     oldestCacheTime?: Date;
+    activeTabUuid?: string;
+    dashboardTabs?: Dashboard['tabs'];
     onAddTiles: (tiles: Dashboard['tiles'][number][]) => void;
     onCancel: () => void;
     onSaveDashboard: () => void;
@@ -74,23 +85,25 @@ type DashboardHeaderProps = {
     onDuplicate: () => void;
     onMoveToSpace: (spaceUuid: string) => void;
     onExport: () => void;
+    onToggleFullscreen: () => void;
+    setAddingTab: (value: React.SetStateAction<boolean>) => void;
+    onTogglePin: () => void;
+    onEditClicked: () => void;
 };
 
 const DashboardHeader = ({
     spaces = [],
-    dashboardDescription,
-    dashboardName,
-    dashboardSpaceName,
-    dashboardSpaceUuid,
-    dashboardViews,
-    dashboardFirstViewedAt,
-    dashboardUpdatedAt,
-    dashboardUpdatedByUser,
+    dashboard,
     organizationUuid,
     hasDashboardChanged,
+    hasNewSemanticLayerChart,
     isEditMode,
     isSaving,
+    isFullscreen,
+    isPinned,
     oldestCacheTime,
+    activeTabUuid,
+    dashboardTabs,
     onAddTiles,
     onCancel,
     onSaveDashboard,
@@ -98,6 +111,10 @@ const DashboardHeader = ({
     onDuplicate,
     onMoveToSpace,
     onExport,
+    onToggleFullscreen,
+    setAddingTab,
+    onTogglePin,
+    onEditClicked,
 }: DashboardHeaderProps) => {
     const { search } = useLocation();
     const { projectUuid, dashboardUuid } = useParams<{
@@ -106,7 +123,8 @@ const DashboardHeader = ({
         organizationUuid: string;
     }>();
 
-    const history = useHistory();
+    const { data: project } = useProject(projectUuid);
+
     const { track } = useTracking();
     const [isUpdating, setIsUpdating] = useState(false);
     const [isCreatingNewSpace, setIsCreatingNewSpace] = useState(false);
@@ -116,6 +134,13 @@ const DashboardHeader = ({
         setIsUpdating(true);
         track({ name: EventName.UPDATE_DASHBOARD_NAME_CLICKED });
     };
+    const { mutate: promoteDashboard } = usePromoteDashboardMutation();
+    const {
+        mutate: getPromoteDashboardDiff,
+        data: promoteDashboardDiff,
+        reset: resetPromoteDashboardDiff,
+        isLoading: promoteDashboardDiffLoading,
+    } = usePromoteDashboardDiffMutation();
 
     useEffect(() => {
         const schedulerUuidFromUrlParams =
@@ -128,7 +153,14 @@ const DashboardHeader = ({
     const { user } = useApp();
     const userCanManageDashboard = user.data?.ability.can(
         'manage',
-        'Dashboard',
+        subject('Dashboard', dashboard),
+    );
+    const userCanCreateDeliveries = user.data?.ability?.can(
+        'create',
+        subject('ScheduledDeliveries', {
+            organizationUuid: user.data?.organizationUuid,
+            projectUuid,
+        }),
     );
 
     const userCanExportData = user.data?.ability.can(
@@ -136,12 +168,54 @@ const DashboardHeader = ({
         subject('ExportCsv', { organizationUuid, projectUuid }),
     );
 
+    const userCanPinDashboard = user.data?.ability.can(
+        'manage',
+        subject('PinnedItems', {
+            organizationUuid,
+            projectUuid,
+        }),
+    );
+
+    const userCanPromoteDashboard = user.data?.ability?.can(
+        'promote',
+        subject('Dashboard', {
+            organizationUuid,
+            projectUuid,
+        }),
+    );
+
+    const handleDashboardRefreshUpdateEvent = useCallback(
+        (intervalMin?: number) => {
+            track({
+                name: EventName.DASHBOARD_AUTO_REFRESH_UPDATED,
+                properties: {
+                    userId: user.data?.userUuid,
+                    dashboardId: dashboardUuid,
+                    organizationId: organizationUuid,
+                    projectId: projectUuid,
+                    frequency: intervalMin ? `${intervalMin} minutes` : 'off',
+                },
+            });
+        },
+        [
+            dashboardUuid,
+            organizationUuid,
+            projectUuid,
+            track,
+            user.data?.userUuid,
+        ],
+    );
+
     return (
-        <PageHeader h="auto">
+        <PageHeader
+            cardProps={{
+                h: 'auto',
+            }}
+        >
             <PageTitleAndDetailsContainer>
                 <Group spacing="xs">
                     <Title order={4} fw={600}>
-                        {dashboardName}
+                        {dashboard.name}
                     </Title>
 
                     <Popover
@@ -158,29 +232,29 @@ const DashboardHeader = ({
                             </ActionIcon>
                         </Popover.Target>
 
-                        <Popover.Dropdown>
+                        <Popover.Dropdown maw={500}>
                             <Stack spacing="xs">
-                                {dashboardDescription && (
+                                {dashboard.description && (
                                     <Text fz="xs" color="gray.7" fw={500}>
-                                        {dashboardDescription}
+                                        {dashboard.description}
                                     </Text>
                                 )}
 
                                 <UpdatedInfo
-                                    updatedAt={dashboardUpdatedAt}
-                                    user={dashboardUpdatedByUser}
+                                    updatedAt={dashboard.updatedAt}
+                                    user={dashboard.updatedByUser}
                                 />
 
                                 <ViewInfo
-                                    views={dashboardViews}
-                                    firstViewedAt={dashboardFirstViewedAt}
+                                    views={dashboard.views}
+                                    firstViewedAt={dashboard.firstViewedAt}
                                 />
 
-                                {dashboardSpaceName && (
+                                {dashboard.spaceName && (
                                     <SpaceAndDashboardInfo
                                         space={{
-                                            link: `/projects/${projectUuid}/spaces/${dashboardSpaceUuid}`,
-                                            name: dashboardSpaceName,
+                                            link: `/projects/${projectUuid}/spaces/${dashboard.spaceUuid}`,
+                                            name: dashboard.spaceName,
                                         }}
                                     />
                                 )}
@@ -198,7 +272,7 @@ const DashboardHeader = ({
                         </ActionIcon>
                     )}
 
-                    {isUpdating && (
+                    {isUpdating && dashboardUuid && (
                         <DashboardUpdateModal
                             uuid={dashboardUuid}
                             opened={isUpdating}
@@ -227,7 +301,12 @@ const DashboardHeader = ({
                     <AddTileButton
                         onAddTiles={onAddTiles}
                         disabled={isSaving}
+                        hasNewSemanticLayerChart={hasNewSemanticLayerChart}
+                        setAddingTab={setAddingTab}
+                        activeTabUuid={activeTabUuid}
+                        dashboardTabs={dashboardTabs}
                     />
+
                     <Tooltip
                         fz="xs"
                         withinPortal
@@ -241,8 +320,9 @@ const DashboardHeader = ({
                                 disabled={!hasDashboardChanged}
                                 loading={isSaving}
                                 onClick={onSaveDashboard}
+                                color="green.7"
                             >
-                                Save
+                                Save changes
                             </Button>
                         </Box>
                     </Tooltip>
@@ -257,9 +337,38 @@ const DashboardHeader = ({
                 </PageActionsContainer>
             ) : (
                 <PageActionsContainer>
-                    {userCanExportData && <DashboardRefreshButton />}
+                    {userCanExportData && (
+                        <DashboardRefreshButton
+                            onIntervalChange={handleDashboardRefreshUpdateEvent}
+                        />
+                    )}
 
-                    {!!userCanManageDashboard && (
+                    {!isEditMode && document.fullscreenEnabled && (
+                        <Tooltip
+                            label={
+                                isFullscreen
+                                    ? 'Exit Fullscreen Mode'
+                                    : 'Enter Fullscreen Mode'
+                            }
+                            withinPortal
+                            position="bottom"
+                        >
+                            <ActionIcon
+                                variant="default"
+                                onClick={onToggleFullscreen}
+                            >
+                                <MantineIcon
+                                    icon={
+                                        isFullscreen
+                                            ? IconArrowsMinimize
+                                            : IconArrowsMaximize
+                                    }
+                                />
+                            </ActionIcon>
+                        </Tooltip>
+                    )}
+
+                    {!!userCanManageDashboard && !isFullscreen && (
                         <Tooltip
                             label="Edit dashboard"
                             withinPortal
@@ -267,179 +376,288 @@ const DashboardHeader = ({
                         >
                             <ActionIcon
                                 variant="default"
-                                onClick={() => {
-                                    history.replace(
-                                        `/projects/${projectUuid}/dashboards/${dashboardUuid}/edit`,
-                                    );
-                                }}
+                                onClick={onEditClicked}
                             >
                                 <MantineIcon icon={IconPencil} />
                             </ActionIcon>
                         </Tooltip>
                     )}
 
-                    {userCanExportData && (
+                    {userCanExportData && !isFullscreen && (
                         <ShareLinkButton url={`${window.location.href}`} />
                     )}
-                    <Menu
-                        position="bottom"
-                        withArrow
-                        withinPortal
-                        shadow="md"
-                        disabled={!userCanManageDashboard && !userCanExportData}
-                    >
-                        <Menu.Target>
-                            <ActionIcon variant="default">
-                                <MantineIcon icon={IconDots} />
-                            </ActionIcon>
-                        </Menu.Target>
 
-                        <Menu.Dropdown>
-                            {!!userCanManageDashboard && (
-                                <>
-                                    <Menu.Item
-                                        icon={<MantineIcon icon={IconCopy} />}
-                                        onClick={onDuplicate}
-                                    >
-                                        Duplicate
-                                    </Menu.Item>
+                    {!isFullscreen && (
+                        <Menu
+                            position="bottom"
+                            withArrow
+                            withinPortal
+                            shadow="md"
+                            disabled={
+                                !userCanManageDashboard && !userCanExportData
+                            }
+                        >
+                            <Menu.Target>
+                                <ActionIcon variant="default">
+                                    <MantineIcon icon={IconDots} />
+                                </ActionIcon>
+                            </Menu.Target>
 
-                                    <Menu.Item
-                                        icon={
-                                            <MantineIcon icon={IconFolders} />
-                                        }
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                        }}
-                                    >
-                                        <Menu
-                                            width={250}
-                                            withArrow
-                                            position="left-start"
-                                            shadow="md"
-                                            offset={40}
-                                            trigger="hover"
+                            <Menu.Dropdown>
+                                {!!userCanManageDashboard && (
+                                    <>
+                                        <Menu.Item
+                                            icon={
+                                                <MantineIcon icon={IconCopy} />
+                                            }
+                                            onClick={onDuplicate}
                                         >
-                                            <Menu.Target>
-                                                <Flex
-                                                    justify="space-between"
-                                                    align="center"
-                                                >
-                                                    Move to space
-                                                    <MantineIcon
-                                                        icon={IconChevronRight}
-                                                    />
-                                                </Flex>
-                                            </Menu.Target>
-                                            <Menu.Dropdown>
-                                                {spaces?.map((spaceToMove) => {
-                                                    const isDisabled =
-                                                        dashboardSpaceUuid ===
-                                                        spaceToMove.uuid;
+                                            Duplicate
+                                        </Menu.Item>
 
-                                                    return (
+                                        <Menu.Item
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconFolders}
+                                                />
+                                            }
+                                            onClick={(
+                                                e: React.MouseEvent<HTMLButtonElement>,
+                                            ) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                            }}
+                                        >
+                                            <Menu
+                                                width={250}
+                                                withArrow
+                                                position="left-start"
+                                                shadow="md"
+                                                offset={40}
+                                                trigger="hover"
+                                            >
+                                                <Menu.Target>
+                                                    <Flex
+                                                        justify="space-between"
+                                                        align="center"
+                                                    >
+                                                        Move to space
+                                                        <MantineIcon
+                                                            icon={
+                                                                IconChevronRight
+                                                            }
+                                                        />
+                                                    </Flex>
+                                                </Menu.Target>
+                                                <Menu.Dropdown>
+                                                    {spaces
+                                                        ?.filter((space) => {
+                                                            return user.data?.ability.can(
+                                                                'create',
+                                                                subject(
+                                                                    'Dashboard',
+                                                                    {
+                                                                        ...space,
+                                                                        access: space.userAccess
+                                                                            ? [
+                                                                                  space.userAccess,
+                                                                              ]
+                                                                            : [],
+                                                                    },
+                                                                ),
+                                                            );
+                                                        })
+                                                        .map((spaceToMove) => {
+                                                            const isDisabled =
+                                                                dashboard.spaceUuid ===
+                                                                spaceToMove.uuid;
+
+                                                            return (
+                                                                <Menu.Item
+                                                                    icon={
+                                                                        <MantineIcon
+                                                                            icon={
+                                                                                isDisabled
+                                                                                    ? IconCheck
+                                                                                    : IconFolder
+                                                                            }
+                                                                        />
+                                                                    }
+                                                                    color={
+                                                                        isDisabled
+                                                                            ? 'gray.5'
+                                                                            : ''
+                                                                    }
+                                                                    onClick={(
+                                                                        e: React.MouseEvent<HTMLButtonElement>,
+                                                                    ) => {
+                                                                        e.preventDefault();
+                                                                        e.stopPropagation();
+                                                                        if (
+                                                                            dashboard.spaceUuid !==
+                                                                            spaceToMove.uuid
+                                                                        ) {
+                                                                            onMoveToSpace(
+                                                                                spaceToMove.uuid,
+                                                                            );
+                                                                        }
+                                                                    }}
+                                                                    key={
+                                                                        spaceToMove.uuid
+                                                                    }
+                                                                >
+                                                                    {
+                                                                        spaceToMove.name
+                                                                    }
+                                                                </Menu.Item>
+                                                            );
+                                                        })}
+                                                    <Can
+                                                        I="create"
+                                                        this={subject('Space', {
+                                                            organizationUuid:
+                                                                user.data
+                                                                    ?.organizationUuid,
+                                                            projectUuid,
+                                                        })}
+                                                    >
+                                                        <Menu.Divider />
+
                                                         <Menu.Item
                                                             icon={
                                                                 <MantineIcon
                                                                     icon={
-                                                                        isDisabled
-                                                                            ? IconCheck
-                                                                            : IconFolder
+                                                                        IconPlus
                                                                     }
                                                                 />
                                                             }
-                                                            color={
-                                                                isDisabled
-                                                                    ? 'gray.5'
-                                                                    : ''
-                                                            }
-                                                            onClick={(e) => {
+                                                            onClick={(
+                                                                e: React.MouseEvent<HTMLButtonElement>,
+                                                            ) => {
                                                                 e.preventDefault();
                                                                 e.stopPropagation();
-                                                                if (
-                                                                    dashboardSpaceUuid !==
-                                                                    spaceToMove.uuid
-                                                                ) {
-                                                                    onMoveToSpace(
-                                                                        spaceToMove.uuid,
-                                                                    );
-                                                                }
+                                                                setIsCreatingNewSpace(
+                                                                    true,
+                                                                );
                                                             }}
-                                                            key={
-                                                                spaceToMove.uuid
-                                                            }
                                                         >
-                                                            {spaceToMove.name}
+                                                            Create new space
                                                         </Menu.Item>
-                                                    );
-                                                })}
+                                                    </Can>
+                                                </Menu.Dropdown>
+                                            </Menu>
+                                        </Menu.Item>
+                                    </>
+                                )}
 
-                                                <Menu.Divider />
-
-                                                <Menu.Item
-                                                    icon={
-                                                        <MantineIcon
-                                                            icon={IconPlus}
-                                                        />
-                                                    }
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        setIsCreatingNewSpace(
-                                                            true,
-                                                        );
-                                                    }}
-                                                >
-                                                    Create new space
-                                                </Menu.Item>
-                                            </Menu.Dropdown>
-                                        </Menu>
-                                    </Menu.Item>
-                                </>
-                            )}
-
-                            {!!userCanManageDashboard && (
-                                <Menu.Item
-                                    icon={<MantineIcon icon={IconSend} />}
-                                    onClick={() => {
-                                        toggleScheduledDeliveriesModal(true);
-                                    }}
-                                >
-                                    Scheduled deliveries
-                                </Menu.Item>
-                            )}
-
-                            {(userCanExportData || userCanManageDashboard) && (
-                                <Menu.Item
-                                    icon={<MantineIcon icon={IconUpload} />}
-                                    onClick={onExport}
-                                >
-                                    Export dashboard{' '}
-                                </Menu.Item>
-                            )}
-
-                            {userCanManageDashboard && (
-                                <>
-                                    <Menu.Divider />
+                                {userCanPinDashboard && (
                                     <Menu.Item
+                                        component="button"
+                                        role="menuitem"
                                         icon={
-                                            <MantineIcon
-                                                icon={IconTrash}
-                                                color="red"
-                                            />
+                                            isPinned ? (
+                                                <MantineIcon
+                                                    icon={IconPinnedOff}
+                                                />
+                                            ) : (
+                                                <MantineIcon icon={IconPin} />
+                                            )
                                         }
-                                        onClick={onDelete}
-                                        color="red"
+                                        onClick={onTogglePin}
                                     >
-                                        Delete
-                                    </Menu.Item>{' '}
-                                </>
-                            )}
-                        </Menu.Dropdown>
-                    </Menu>
+                                        {isPinned
+                                            ? 'Unpin from homepage'
+                                            : 'Pin to homepage'}
+                                    </Menu.Item>
+                                )}
 
-                    {isCreatingNewSpace && (
+                                {!!userCanCreateDeliveries &&
+                                    !hasNewSemanticLayerChart && (
+                                        <Menu.Item
+                                            icon={
+                                                <MantineIcon icon={IconSend} />
+                                            }
+                                            onClick={() => {
+                                                toggleScheduledDeliveriesModal(
+                                                    true,
+                                                );
+                                            }}
+                                        >
+                                            Scheduled deliveries
+                                        </Menu.Item>
+                                    )}
+
+                                {userCanPromoteDashboard && dashboardUuid && (
+                                    <Tooltip
+                                        label="You must enable first an upstream project in settings > Data ops"
+                                        disabled={
+                                            project?.upstreamProjectUuid !==
+                                            undefined
+                                        }
+                                        withinPortal
+                                    >
+                                        <div>
+                                            <Menu.Item
+                                                disabled={
+                                                    project?.upstreamProjectUuid ===
+                                                    undefined
+                                                }
+                                                icon={
+                                                    <MantineIcon
+                                                        icon={
+                                                            IconDatabaseExport
+                                                        }
+                                                    />
+                                                }
+                                                onClick={() =>
+                                                    getPromoteDashboardDiff(
+                                                        dashboardUuid,
+                                                    )
+                                                }
+                                            >
+                                                Promote dashboard
+                                            </Menu.Item>
+                                        </div>
+                                    </Tooltip>
+                                )}
+
+                                {(userCanExportData ||
+                                    userCanManageDashboard) &&
+                                    !hasNewSemanticLayerChart && (
+                                        <Menu.Item
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconUpload}
+                                                />
+                                            }
+                                            onClick={onExport}
+                                        >
+                                            Export dashboard
+                                        </Menu.Item>
+                                    )}
+
+                                {userCanManageDashboard && (
+                                    <>
+                                        <Menu.Divider />
+                                        <Menu.Item
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconTrash}
+                                                    color="red"
+                                                />
+                                            }
+                                            onClick={onDelete}
+                                            color="red"
+                                        >
+                                            Delete
+                                        </Menu.Item>{' '}
+                                    </>
+                                )}
+                            </Menu.Dropdown>
+                        </Menu>
+                    )}
+
+                    {isCreatingNewSpace && projectUuid && (
                         <SpaceActionModal
                             projectUuid={projectUuid}
                             actionType={ActionType.CREATE}
@@ -455,13 +673,27 @@ const DashboardHeader = ({
                     {isScheduledDeliveriesModalOpen && dashboardUuid && (
                         <DashboardSchedulersModal
                             dashboardUuid={dashboardUuid}
-                            name={dashboardName}
+                            name={dashboard.name}
                             isOpen={isScheduledDeliveriesModalOpen}
                             onClose={() =>
                                 toggleScheduledDeliveriesModal(false)
                             }
                         />
                     )}
+                    {(promoteDashboardDiff || promoteDashboardDiffLoading) &&
+                        dashboardUuid && (
+                            <PromotionConfirmDialog
+                                type="dashboard"
+                                resourceName={dashboard.name}
+                                promotionChanges={promoteDashboardDiff}
+                                onClose={() => {
+                                    resetPromoteDashboardDiff();
+                                }}
+                                onConfirm={() => {
+                                    promoteDashboard(dashboardUuid);
+                                }}
+                            ></PromotionConfirmDialog>
+                        )}
                 </PageActionsContainer>
             )}
         </PageHeader>

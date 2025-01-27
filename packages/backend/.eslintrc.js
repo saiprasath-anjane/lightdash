@@ -11,7 +11,6 @@ module.exports = {
         'airbnb-typescript/base',
         'prettier',
     ],
-    plugins: ['@typescript-eslint'],
     rules: {
         'import/prefer-default-export': 'off',
         '@typescript-eslint/no-unused-vars': 'off',
@@ -20,6 +19,7 @@ module.exports = {
         'max-classes-per-file': 'off',
         'no-case-declarations': 'off',
         'no-template-curly-in-string': 'off',
+        'no-restricted-syntax': 'off',
         eqeqeq: 'error',
     },
 };

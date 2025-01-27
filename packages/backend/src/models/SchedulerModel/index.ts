@@ -16,8 +16,10 @@ import {
     SchedulerSlackTarget,
     SchedulerWithLogs,
     UpdateSchedulerAndTargets,
+    type SchedulerCronUpdate,
 } from '@lightdash/common';
 import { Knex } from 'knex';
+import { DatabaseError } from 'pg';
 import { DashboardsTableName } from '../../database/entities/dashboards';
 import { ProjectTableName } from '../../database/entities/projects';
 import { SavedChartsTableName } from '../../database/entities/savedCharts';
@@ -34,7 +36,7 @@ import {
 import { SpaceTableName } from '../../database/entities/spaces';
 import { UserTableName } from '../../database/entities/users';
 
-type ModelDependencies = {
+type SchedulerModelArguments = {
     database: Knex;
 };
 
@@ -48,8 +50,8 @@ const statusOrder = [
 export class SchedulerModel {
     private database: Knex;
 
-    constructor(deps: ModelDependencies) {
-        this.database = deps.database;
+    constructor(args: SchedulerModelArguments) {
+        this.database = args.database;
     }
 
     static convertScheduler(scheduler: SchedulerDb): Scheduler {
@@ -61,12 +63,18 @@ export class SchedulerModel {
             updatedAt: scheduler.updated_at,
             createdBy: scheduler.created_by,
             cron: scheduler.cron,
+            timezone: scheduler.timezone ?? undefined,
             savedChartUuid: scheduler.saved_chart_uuid,
             dashboardUuid: scheduler.dashboard_uuid,
             format: scheduler.format,
             options: scheduler.options,
             filters: scheduler.filters,
             customViewportWidth: scheduler.custom_viewport_width,
+            thresholds: scheduler.thresholds || undefined,
+            enabled: scheduler.enabled,
+            notificationFrequency: scheduler.notification_frequency,
+            selectedTabs: scheduler.selected_tabs,
+            includeLinks: scheduler.include_links,
         } as Scheduler;
     }
 
@@ -134,7 +142,15 @@ export class SchedulerModel {
     }
 
     async getAllSchedulers(): Promise<SchedulerAndTargets[]> {
-        const schedulers = this.database(SchedulerTableName).select();
+        const schedulers = this.database(SchedulerTableName)
+            .select()
+            .join(
+                UserTableName,
+                `${UserTableName}.user_uuid`,
+                `${SchedulerTableName}.created_by`,
+            )
+            .where(`${SchedulerTableName}.enabled`, true)
+            .where(`${UserTableName}.is_active`, true);
         return this.getSchedulersWithTargets(await schedulers);
     }
 
@@ -143,7 +159,17 @@ export class SchedulerModel {
     ): Promise<SchedulerAndTargets[]> {
         const schedulers = this.database(SchedulerTableName)
             .select()
-            .where(`${SchedulerTableName}.saved_chart_uuid`, savedChartUuid);
+            .where(`${SchedulerTableName}.saved_chart_uuid`, savedChartUuid)
+            .orderBy([
+                {
+                    column: 'name',
+                    order: 'asc',
+                },
+                {
+                    column: 'created_at',
+                    order: 'asc',
+                },
+            ]);
         return this.getSchedulersWithTargets(await schedulers);
     }
 
@@ -152,7 +178,17 @@ export class SchedulerModel {
     ): Promise<SchedulerAndTargets[]> {
         const schedulers = this.database(SchedulerTableName)
             .select()
-            .where(`${SchedulerTableName}.dashboard_uuid`, dashboardUuid);
+            .where(`${SchedulerTableName}.dashboard_uuid`, dashboardUuid)
+            .orderBy([
+                {
+                    column: 'name',
+                    order: 'asc',
+                },
+                {
+                    column: 'created_at',
+                    order: 'asc',
+                },
+            ]);
         return this.getSchedulersWithTargets(await schedulers);
     }
 
@@ -210,6 +246,7 @@ export class SchedulerModel {
                     format: newScheduler.format,
                     created_by: newScheduler.createdBy,
                     cron: newScheduler.cron,
+                    timezone: newScheduler.timezone ?? null,
                     saved_chart_uuid: newScheduler.savedChartUuid,
                     dashboard_uuid: newScheduler.dashboardUuid,
                     updated_at: new Date(),
@@ -224,6 +261,18 @@ export class SchedulerModel {
                         newScheduler.customViewportWidth
                             ? newScheduler.customViewportWidth
                             : null,
+                    thresholds: newScheduler.thresholds
+                        ? JSON.stringify(newScheduler.thresholds)
+                        : null,
+                    enabled: true,
+                    notification_frequency:
+                        newScheduler.notificationFrequency || null,
+                    selected_tabs:
+                        isDashboardScheduler(newScheduler) &&
+                        newScheduler.selectedTabs
+                            ? newScheduler.selectedTabs
+                            : null,
+                    include_links: newScheduler.includeLinks !== false,
                 })
                 .returning('*');
             const targetPromises = newScheduler.targets.map(async (target) => {
@@ -248,6 +297,20 @@ export class SchedulerModel {
         return this.getSchedulerAndTargets(schedulerUuid);
     }
 
+    async setSchedulerEnabled(
+        schedulerUuid: string,
+        enabled: boolean,
+    ): Promise<SchedulerAndTargets> {
+        await this.database(SchedulerTableName)
+            .update({
+                enabled,
+                updated_at: new Date(),
+            })
+            .where('scheduler_uuid', schedulerUuid);
+
+        return this.getSchedulerAndTargets(schedulerUuid);
+    }
+
     async updateScheduler(
         scheduler: UpdateSchedulerAndTargets,
     ): Promise<SchedulerAndTargets> {
@@ -258,6 +321,7 @@ export class SchedulerModel {
                     message: scheduler.message,
                     format: scheduler.format,
                     cron: scheduler.cron,
+                    timezone: scheduler.timezone ?? null,
                     updated_at: new Date(),
                     options: scheduler.options,
                     filters:
@@ -269,6 +333,16 @@ export class SchedulerModel {
                         scheduler.customViewportWidth
                             ? scheduler.customViewportWidth
                             : null,
+                    thresholds: scheduler.thresholds
+                        ? JSON.stringify(scheduler.thresholds)
+                        : null,
+                    notification_frequency:
+                        scheduler.notificationFrequency || null,
+                    selected_tabs:
+                        'selectedTabs' in scheduler && scheduler.selectedTabs
+                            ? (scheduler.selectedTabs as string[])
+                            : null,
+                    include_links: scheduler.includeLinks !== false,
                 })
                 .where('scheduler_uuid', scheduler.schedulerUuid);
 
@@ -394,11 +468,25 @@ export class SchedulerModel {
                 `${SavedChartsTableName}.saved_query_uuid`,
                 `${SchedulerTableName}.saved_chart_uuid`,
             )
-            .leftJoin(
-                SpaceTableName,
-                `${SpaceTableName}.space_id`,
-                `${SavedChartsTableName}.space_id`,
-            )
+            .leftJoin(DashboardsTableName, function joinDashboards() {
+                this.on(
+                    `${DashboardsTableName}.dashboard_uuid`,
+                    '=',
+                    `${SavedChartsTableName}.dashboard_uuid`,
+                ).andOnNotNull(`${SavedChartsTableName}.dashboard_uuid`);
+            })
+            .leftJoin(SpaceTableName, function joinSpaces() {
+                this.on(
+                    `${SpaceTableName}.space_id`,
+                    '=',
+                    `${SavedChartsTableName}.space_id`,
+                ).andOnNotNull(`${SavedChartsTableName}.space_id`);
+                this.orOn(
+                    `${SpaceTableName}.space_id`,
+                    '=',
+                    `${DashboardsTableName}.space_id`,
+                );
+            })
             .leftJoin(
                 ProjectTableName,
                 `${ProjectTableName}.project_id`,
@@ -533,6 +621,7 @@ export class SchedulerModel {
 
             if (
                 !(
+                    error instanceof DatabaseError &&
                     error.code === FOREIGN_KEY_VIOLATION_ERROR_CODE &&
                     error.constraint === 'scheduler_log_scheduler_uuid_foreign'
                 )
@@ -567,7 +656,7 @@ export class SchedulerModel {
         const jobs = await this.database(SchedulerLogTableName)
             .where(`job_id`, jobId)
             .andWhere((query) => {
-                query
+                void query
                     .where('task', 'downloadCsv')
                     .orWhere('task', 'uploadGsheetFromQuery');
             })
@@ -590,11 +679,29 @@ export class SchedulerModel {
             .orderBy('scheduled_time', 'desc')
             .returning('*');
 
+        if (jobs.length === 0) throw new NotFoundError('Job not found');
+
         const job = jobs.sort(
             (a, b) =>
                 statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status),
         )[0];
 
         return job;
+    }
+
+    async bulkUpdateSchedulersCron(
+        schedulerCronUpdates: SchedulerCronUpdate[],
+    ) {
+        await this.database.transaction(async (trx) => {
+            const updatePromises = schedulerCronUpdates.map(
+                async ({ schedulerUuid, cron }) => {
+                    await trx(SchedulerTableName)
+                        .update({ cron })
+                        .where('scheduler_uuid', schedulerUuid);
+                },
+            );
+
+            await Promise.all(updatePromises);
+        });
     }
 }

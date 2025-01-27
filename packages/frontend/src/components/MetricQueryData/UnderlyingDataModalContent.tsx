@@ -2,36 +2,39 @@ import { subject } from '@casl/ability';
 import {
     ChartType,
     convertFieldRefToFieldId,
-    CreateSavedChartVersion,
-    Field,
-    fieldId as getFieldId,
     FilterOperator,
-    FilterRule,
     getDimensions,
     getFields,
+    getFiltersFromGroup,
+    getItemId,
     isDimension,
     isField,
     isMetric,
-    Metric,
-    MetricQuery,
+    type CreateSavedChartVersion,
+    type Field,
+    type FilterRule,
+    type Metric,
+    type MetricQuery,
 } from '@lightdash/common';
-import { Box, Group, Modal, Title } from '@mantine/core';
+import { Box, Button, Group, Modal, Title } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
-import { FC, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { IconShare2 } from '@tabler/icons-react';
+import { useCallback, useMemo, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import { downloadCsv } from '../../api/csv';
 import { useExplore } from '../../hooks/useExplore';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
 import { useUnderlyingDataResults } from '../../hooks/useQueryResults';
-import { useApp } from '../../providers/AppProvider';
+import useApp from '../../providers/App/useApp';
 import { Can } from '../common/Authorization';
 import ErrorState from '../common/ErrorState';
 import LinkButton from '../common/LinkButton';
-import { TableColumn } from '../common/Table/types';
-import DownloadCsvButton from '../DownloadCsvButton';
-import { useMetricQueryDataContext } from './MetricQueryDataProvider';
+import MantineIcon from '../common/MantineIcon';
+import { type TableColumn } from '../common/Table/types';
+import ExportCSVModal from '../ExportCSV/ExportCSVModal';
 import UnderlyingDataResultsTable from './UnderlyingDataResultsTable';
+import { useMetricQueryDataContext } from './useMetricQueryDataContext';
 
 interface Props {}
 
@@ -89,7 +92,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
 
             const indexOfUnderlyingValue = (column: TableColumn): number => {
                 const columnDimension = allDimensions.find(
-                    (dimension) => getFieldId(dimension) === column.id,
+                    (dimension) => getItemId(dimension) === column.id,
                 );
                 if (columnDimension === undefined) return -1;
                 return showUnderlyingValues?.indexOf(columnDimension.name) !==
@@ -126,7 +129,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
         // On charts, we might want to include the dimensions from SQLquery and not from rowdata, so we include those instead
         const dimensionFieldIds = dimensions ? dimensions : rowFieldIds;
         const fieldsInQuery = allFields.filter((field) =>
-            dimensionFieldIds.includes(getFieldId(field)),
+            dimensionFieldIds.includes(getItemId(field)),
         );
         const availableTables = new Set([
             ...joinedTables,
@@ -151,7 +154,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
                       values: raw === null ? undefined : [raw],
                   };
                   const isValidDimension = allDimensions.find(
-                      (dimension) => getFieldId(dimension) === key,
+                      (dimension) => getItemId(dimension) === key,
                   );
 
                   if (isValidDimension) {
@@ -163,7 +166,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
                   {
                       id: uuidv4(),
                       target: {
-                          fieldId: getFieldId(item),
+                          fieldId: getItemId(item),
                       },
                       operator:
                           value.raw === null
@@ -213,12 +216,14 @@ const UnderlyingDataModalContent: FC<Props> = () => {
             ...metricFilters,
         ];
 
-        const allFilters = {
-            dimensions: {
+        const allFilters = getFiltersFromGroup(
+            {
                 id: uuidv4(),
                 and: combinedFilters,
             },
-        };
+            allFields,
+        );
+
         const showUnderlyingTable: string | undefined = isField(item)
             ? item.table
             : undefined;
@@ -235,7 +240,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
                       )
                     : true),
         );
-        const dimensionFields = availableDimensions.map(getFieldId);
+        const dimensionFields = availableDimensions.map(getItemId);
         return {
             ...defaultMetricQuery,
             dimensions: dimensionFields,
@@ -255,7 +260,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
         const selectedDimensions = underlyingDataMetricQuery.dimensions;
         const dimensions = explore ? getDimensions(explore) : [];
         return dimensions.reduce((acc, dimension) => {
-            const fieldId = isField(dimension) ? getFieldId(dimension) : '';
+            const fieldId = isField(dimension) ? getItemId(dimension) : '';
             if (selectedDimensions.includes(fieldId))
                 return {
                     ...acc,
@@ -302,21 +307,27 @@ const UnderlyingDataModalContent: FC<Props> = () => {
     const {
         error,
         data: resultsData,
-        isLoading,
+        isInitialLoading,
     } = useUnderlyingDataResults(tableName, underlyingDataMetricQuery);
 
-    const getCsvLink = async () => {
-        const csvResponse = await downloadCsv({
-            projectUuid,
-            tableId: tableName,
-            query: underlyingDataMetricQuery,
-            csvLimit: resultsData?.rows.length,
-            onlyRaw: false,
-            showTableNames: true,
-            columnOrder: [],
-        });
-        return csvResponse;
+    const getCsvLink = async (limit: number | null, onlyRaw: boolean) => {
+        if (projectUuid) {
+            return downloadCsv({
+                projectUuid,
+                tableId: tableName,
+                query: underlyingDataMetricQuery,
+                csvLimit: limit,
+                onlyRaw,
+                showTableNames: true,
+                columnOrder: [],
+                pivotColumns: undefined, // underlying data is always unpivoted
+            });
+        } else {
+            throw new Error('Project UUID is missing');
+        }
     };
+
+    const [isCSVExportModalOpen, setIsCSVExportModalOpen] = useState(false);
 
     return (
         <Modal.Content
@@ -340,13 +351,30 @@ const UnderlyingDataModalContent: FC<Props> = () => {
                                     projectUuid: projectUuid,
                                 })}
                             >
-                                <DownloadCsvButton
-                                    getCsvLink={getCsvLink}
-                                    disabled={
-                                        !resultsData?.rows ||
-                                        resultsData?.rows.length <= 0
+                                <Button
+                                    leftIcon={<MantineIcon icon={IconShare2} />}
+                                    variant="subtle"
+                                    compact
+                                    onClick={() =>
+                                        setIsCSVExportModalOpen(true)
                                     }
-                                />
+                                >
+                                    Export CSV
+                                </Button>
+                                {!!projectUuid && (
+                                    <ExportCSVModal
+                                        getCsvLink={getCsvLink}
+                                        onClose={() =>
+                                            setIsCSVExportModalOpen(false)
+                                        }
+                                        onConfirm={() =>
+                                            setIsCSVExportModalOpen(false)
+                                        }
+                                        opened={isCSVExportModalOpen}
+                                        projectUuid={projectUuid}
+                                        rows={resultsData?.rows}
+                                    />
+                                )}
                             </Can>
                             <Can
                                 I="manage"
@@ -380,7 +408,7 @@ const UnderlyingDataModalContent: FC<Props> = () => {
                     <ErrorState error={error.error} hasMarginTop={false} />
                 ) : (
                     <UnderlyingDataResultsTable
-                        isLoading={isLoading}
+                        isLoading={isInitialLoading}
                         resultsData={resultsData}
                         fieldsMap={fieldsMap}
                         hasJoins={joinedTables.length > 0}

@@ -1,4 +1,5 @@
-import { ParseError } from '@lightdash/common';
+import { getErrorMessage, ParseError } from '@lightdash/common';
+import { Command } from 'commander';
 import execa from 'execa';
 import { LightdashAnalytics } from '../../analytics/analytics';
 import GlobalState from '../../globalState';
@@ -6,15 +7,23 @@ import { generateHandler } from '../generate';
 import { DbtCompileOptions } from './compile';
 
 type DbtRunHandlerOptions = DbtCompileOptions & {
+    profilesDir: string;
+    projectDir: string;
     excludeMeta: boolean;
     verbose: boolean;
+    assumeYes: boolean;
 };
 
 export const dbtRunHandler = async (
     options: DbtRunHandlerOptions,
-    command: any,
+    command: Command,
 ) => {
     GlobalState.setVerbose(options.verbose);
+
+    if (!command.parent) {
+        throw new Error('Parent command not found');
+    }
+
     await LightdashAnalytics.track({
         event: 'dbt_command.started',
         properties: {
@@ -22,8 +31,8 @@ export const dbtRunHandler = async (
         },
     });
 
-    const commands = command.parent.args.reduce((acc: any, arg: any) => {
-        if (arg === '--verbose') return acc;
+    const commands = command.parent.args.reduce<string[]>((acc, arg) => {
+        if (arg === '--verbose' || arg === '--assume-yes') return acc;
         return [...acc, arg];
     }, []);
 
@@ -34,19 +43,19 @@ export const dbtRunHandler = async (
             stdio: 'inherit',
         });
         await subprocess;
-    } catch (e: any) {
+    } catch (e: unknown) {
+        const msg = getErrorMessage(e);
         await LightdashAnalytics.track({
             event: 'dbt_command.error',
             properties: {
                 command: `${commands}`,
-                error: `${e.message}`,
+                error: `${msg}`,
             },
         });
-        throw new ParseError(`Failed to run dbt:\n  ${e.message}`);
+        throw new ParseError(`Failed to run dbt:\n  ${msg}`);
     }
     await generateHandler({
         ...options,
-        assumeYes: true,
         excludeMeta: options.excludeMeta,
     });
 };

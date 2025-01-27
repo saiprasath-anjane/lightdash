@@ -1,16 +1,16 @@
 import {
-    AdditionalMetric,
-    CustomDimension,
-    DimensionType,
-    Field,
     getItemColor,
     getItemIcon,
-    isCustomDimension,
+    isCustomBinDimension,
+    isCustomSqlDimension,
     isDimension,
     isField,
     isMetric,
-    MetricType,
-    TableCalculation,
+    isTableCalculation,
+    type AdditionalMetric,
+    type CustomDimension,
+    type Field,
+    type TableCalculation,
 } from '@lightdash/common';
 import {
     Icon123,
@@ -22,34 +22,25 @@ import {
     IconToggleLeft,
 } from '@tabler/icons-react';
 import { forwardRef } from 'react';
-import MantineIcon, { MantineIconProps } from '../MantineIcon';
-
-const getItemIconName = (type: DimensionType | MetricType) => {
-    switch (type) {
-        case DimensionType.STRING || MetricType.STRING:
-            return 'citation';
-        case DimensionType.NUMBER || MetricType.NUMBER:
-            return 'numerical';
-        case DimensionType.DATE || MetricType.DATE:
-            return 'calendar';
-        case DimensionType.BOOLEAN || MetricType.BOOLEAN:
-            return 'segmented-control';
-        case DimensionType.TIMESTAMP || MetricType.TIMESTAMP:
-            return 'time';
-        default:
-            return 'numerical';
-    }
-};
+import MantineIcon, { type MantineIconProps } from '../MantineIcon';
+import { getItemIconName } from './utils/fieldIconUtils';
 
 const getFieldIcon = (
     field: Field | TableCalculation | AdditionalMetric | CustomDimension,
 ) => {
-    if (isCustomDimension(field)) {
+    if (isCustomBinDimension(field)) {
         return 'citation';
     }
-    if (isField(field) && (isDimension(field) || isMetric(field))) {
-        return getItemIconName(field.type);
+    if (isCustomSqlDimension(field)) {
+        return getItemIconName(field.dimensionType);
     }
+    if (
+        (isField(field) && (isDimension(field) || isMetric(field))) ||
+        isTableCalculation(field)
+    ) {
+        if (field.type) return getItemIconName(field.type);
+    }
+
     return getItemIcon(field);
 };
 
@@ -70,7 +61,6 @@ const FieldIcon = forwardRef<SVGSVGElement, Props>(
             size,
             color: iconColor,
         };
-
         switch (getFieldIcon(item)) {
             case 'citation':
                 return <MantineIcon icon={IconAbc} {...props} />;

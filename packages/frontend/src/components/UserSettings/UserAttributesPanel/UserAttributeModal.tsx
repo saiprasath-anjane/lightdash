@@ -1,4 +1,8 @@
-import { CreateUserAttribute, UserAttribute } from '@lightdash/common';
+import {
+    FeatureFlags,
+    type CreateUserAttribute,
+    type UserAttribute,
+} from '@lightdash/common';
 import {
     ActionIcon,
     Button,
@@ -14,8 +18,8 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconTrash, IconUserPlus, IconUsersPlus } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
-import { FC, useEffect, useState } from 'react';
+import { useEffect, useState, type FC } from 'react';
+import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import { useOrganizationGroups } from '../../../hooks/useOrganizationGroups';
 import { useOrganizationUsers } from '../../../hooks/useOrganizationUsers';
 import {
@@ -30,15 +34,68 @@ const UserAttributeModal: FC<{
     allUserAttributes: UserAttribute[];
     onClose: () => void;
 }> = ({ opened, userAttribute, allUserAttributes, onClose }) => {
-    const isGroupsFeatureFlagEnabled =
-        useFeatureFlagEnabled('group-management');
+    const { data: UserGroupsFeatureFlag } = useFeatureFlag(
+        FeatureFlags.UserGroupsEnabled,
+    );
+
     const form = useForm<CreateUserAttribute>({
         initialValues: {
             name: userAttribute?.name || '',
             description: userAttribute?.description,
             users: userAttribute?.users || [],
-            // TODO: add groups
+            groups: userAttribute?.groups || [],
             attributeDefault: userAttribute?.attributeDefault || null,
+        },
+        validate: {
+            name: (value: string) => {
+                if (!/^[a-z_][a-z0-9_]*$/.test(value)) {
+                    return `Invalid attribute name. Attribute name must contain only lowercase characters, '_' or numbers and it can't start with a number`;
+                }
+                if (
+                    allUserAttributes.some(
+                        (attr) =>
+                            attr.name === value &&
+                            attr.uuid !== userAttribute?.uuid,
+                    )
+                ) {
+                    return `Attribute with the same name already exists`;
+                }
+                return null;
+            },
+            users: (value: { userUuid: string; value: string }[]) => {
+                if (
+                    value.reduceRight(
+                        (acc, user, index) =>
+                            acc ||
+                            value.some(
+                                (otherUser, otherIndex) =>
+                                    index !== otherIndex &&
+                                    user.userUuid === otherUser.userUuid,
+                            ),
+                        false,
+                    )
+                ) {
+                    return `Duplicated users`;
+                }
+                return null;
+            },
+            groups: (value: { groupUuid: string; value: string }[]) => {
+                if (
+                    value.reduceRight(
+                        (acc, group, index) =>
+                            acc ||
+                            value.some(
+                                (otherGroup, otherIndex) =>
+                                    index !== otherIndex &&
+                                    group.groupUuid === otherGroup.groupUuid,
+                            ),
+                        false,
+                    )
+                ) {
+                    return `Duplicated groups`;
+                }
+                return null;
+            },
         },
     });
     const [inputError, setInputError] = useState<string | undefined>();
@@ -63,38 +120,6 @@ const UserAttributeModal: FC<{
         if (onClose) onClose();
     };
     const handleSubmit = async (data: CreateUserAttribute) => {
-        // Input validation
-        if (!/^[a-z_][a-z0-9_]*$/.test(data.name)) {
-            setInputError(
-                `Invalid attribute name. Attribute name must contain only lowercase characters, '_' or numbers and it can't start with a number`,
-            );
-            return;
-        }
-        if (
-            allUserAttributes.some(
-                (attr) =>
-                    attr.name === data.name &&
-                    attr.uuid !== userAttribute?.uuid,
-            )
-        ) {
-            setInputError(`Attribute with the same name already exists`);
-            return;
-        }
-
-        const duplicatedUsers = data.users?.reduceRight(
-            (acc, user, index) =>
-                acc ||
-                data.users?.some(
-                    (otherUser, otherIndex) =>
-                        index !== otherIndex &&
-                        user.userUuid === otherUser.userUuid,
-                ),
-            false,
-        );
-        if (duplicatedUsers) {
-            setInputError(`Duplicated users`);
-            return;
-        }
         if (userAttribute?.uuid) {
             await updateUserAttribute(data);
         } else {
@@ -104,9 +129,15 @@ const UserAttributeModal: FC<{
     };
 
     const { data: orgUsers } = useOrganizationUsers();
-    const { data: groups } = useOrganizationGroups(undefined, {
-        enabled: !!isGroupsFeatureFlagEnabled,
+    const { data: groups } = useOrganizationGroups({
+        queryOptions: {
+            enabled: !!UserGroupsFeatureFlag?.enabled,
+        },
     });
+
+    if (!UserGroupsFeatureFlag) return null;
+
+    const isGroupManagementEnabled = UserGroupsFeatureFlag?.enabled;
 
     return (
         <Modal
@@ -117,7 +148,12 @@ const UserAttributeModal: FC<{
                     {userAttribute ? 'Update' : 'Add'} user attribute
                 </Title>
             }
+            yOffset={65}
             size="lg"
+            styles={(theme) => ({
+                header: { borderBottom: `1px solid ${theme.colors.gray[4]}` },
+                body: { padding: 0 },
+            })}
         >
             <form
                 name="add_user_attribute"
@@ -125,7 +161,7 @@ const UserAttributeModal: FC<{
                     handleSubmit(values),
                 )}
             >
-                <Stack spacing="xs">
+                <Stack spacing="xs" p="md">
                     <TextInput
                         name="name"
                         label="Attribute name"
@@ -174,6 +210,11 @@ const UserAttributeModal: FC<{
                     <Stack>
                         <Stack spacing="xs">
                             <Text fw={500}>Assign to users</Text>
+                            {!form.isValid('users') && (
+                                <Text color="red" size="xs">
+                                    {form.errors.users}
+                                </Text>
+                            )}
 
                             {form.values.users?.map((user, index) => {
                                 return (
@@ -250,12 +291,15 @@ const UserAttributeModal: FC<{
                             </Button>
                         </Stack>
 
-                        {isGroupsFeatureFlagEnabled && (
+                        {isGroupManagementEnabled && (
                             <Stack spacing="xs">
                                 <Text fw={500}>Assign to groups</Text>
-
-                                {/* TODO: Get from form.values.groups */}
-                                {[].map((user, index) => {
+                                {!form.isValid('groups') && (
+                                    <Text color="red" size="xs">
+                                        {form.errors.groups}
+                                    </Text>
+                                )}
+                                {form.values.groups.map((group, index) => {
                                     return (
                                         <Group key={index}>
                                             <Select
@@ -271,13 +315,15 @@ const UserAttributeModal: FC<{
                                                 required
                                                 searchable
                                                 {...form.getInputProps(
-                                                    `groups.${index}.userUuid`,
+                                                    `groups.${index}.groupUuid`,
                                                 )}
                                                 data={
-                                                    groups?.map((orgUser) => ({
-                                                        value: orgUser.uuid,
-                                                        label: orgUser.name,
-                                                    })) || []
+                                                    groups?.map(
+                                                        (groupInfo) => ({
+                                                            value: groupInfo.uuid,
+                                                            label: groupInfo.name,
+                                                        }),
+                                                    ) || []
                                                 }
                                             />
 
@@ -305,8 +351,7 @@ const UserAttributeModal: FC<{
                                                 onClick={() => {
                                                     form.setFieldValue(
                                                         'groups',
-                                                        // TODO: Get from form.values.groups
-                                                        [].filter(
+                                                        form.values.groups.filter(
                                                             (_, i) =>
                                                                 i !== index,
                                                         ),
@@ -326,11 +371,10 @@ const UserAttributeModal: FC<{
                                         <MantineIcon icon={IconUsersPlus} />
                                     }
                                     onClick={() => {
-                                        form.setFieldValue('groups', [
-                                            // TODO: Get from form.values.groups
-                                            ...[],
-                                            { uuid: '', name: '' },
-                                        ]);
+                                        form.insertListItem('groups', {
+                                            groupUuid: '',
+                                            value: '',
+                                        });
                                     }}
                                 >
                                     Add group
@@ -338,21 +382,31 @@ const UserAttributeModal: FC<{
                             </Stack>
                         )}
                     </Stack>
-
-                    <Group spacing="xs" position="right">
-                        <Button
-                            onClick={() => {
-                                handleClose();
-                            }}
-                            variant="outline"
-                        >
-                            Cancel
-                        </Button>
-                        <Button type="submit">
-                            {userAttribute ? 'Update' : 'Add'}
-                        </Button>
-                    </Group>
                 </Stack>
+                <Group
+                    spacing="xs"
+                    position="right"
+                    sx={(theme) => ({
+                        position: 'sticky',
+                        backgroundColor: 'white',
+                        borderTop: `1px solid ${theme.colors.gray[4]}`,
+                        bottom: 0,
+                        zIndex: 2,
+                        padding: theme.spacing.md,
+                    })}
+                >
+                    <Button
+                        onClick={() => {
+                            handleClose();
+                        }}
+                        variant="outline"
+                    >
+                        Cancel
+                    </Button>
+                    <Button type="submit">
+                        {userAttribute ? 'Update' : 'Add'}
+                    </Button>
+                </Group>
             </form>
         </Modal>
     );

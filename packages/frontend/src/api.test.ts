@@ -1,38 +1,42 @@
-import fetchMock from 'jest-fetch-mock';
-import { lightdashApi } from './api';
+import nock from 'nock';
+import { describe, expect, it } from 'vitest';
+import { BASE_API_URL, lightdashApi } from './api';
 
 describe('api', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        fetchMock.mockResponse(async () => ({
-            body: JSON.stringify({
+    it('should handle success response', async () => {
+        const scope = nock(BASE_API_URL)
+            .matchHeader('Content-Type', 'application/json')
+            .matchHeader('Lightdash-Request-Method', 'WEB_APP')
+            .get('/api/v1/test')
+            .reply(200, {
                 status: 'ok',
                 results: 'test',
-            }),
-        }));
-    });
+            });
 
-    it('should handle success response', async () => {
         const result = await lightdashApi({
             method: 'GET',
             url: '/test',
             body: null,
             headers: undefined,
         });
+
+        scope.done();
+
         expect(result).toEqual('test');
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock).toHaveBeenCalledWith('/api/v1/test', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Lightdash-Request-Method': 'WEB_APP',
-            },
-            body: null,
-        });
+        expect(scope.isDone()).toBe(true);
     });
 
     it('should allow custom headers', async () => {
-        await lightdashApi({
+        const scope = nock(BASE_API_URL)
+            .matchHeader('Content-Type', 'application/json')
+            .matchHeader('Lightdash-Request-Method', 'TEST')
+            .get('/api/v1/test')
+            .reply(200, {
+                status: 'ok',
+                results: 'another test',
+            });
+
+        const result = await lightdashApi({
             method: 'GET',
             url: '/test',
             body: null,
@@ -40,14 +44,10 @@ describe('api', () => {
                 'Lightdash-Request-Method': 'TEST',
             },
         });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock).toHaveBeenCalledWith('/api/v1/test', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Lightdash-Request-Method': 'TEST',
-            },
-            body: null,
-        });
+
+        scope.done();
+
+        expect(scope.isDone()).toBe(true);
+        expect(result).toEqual('another test');
     });
 });

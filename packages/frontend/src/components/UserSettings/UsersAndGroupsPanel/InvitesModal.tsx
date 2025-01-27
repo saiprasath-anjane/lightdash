@@ -1,15 +1,17 @@
 import {
-    CreateInviteLink,
+    getEmailSchema,
     OrganizationMemberRole,
-    validateEmail,
+    type CreateInviteLink,
 } from '@lightdash/common';
 import { Button, Group, Modal, Select, TextInput, Title } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { useForm, zodResolver } from '@mantine/form';
 import { IconUser } from '@tabler/icons-react';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
+import { z } from 'zod';
 import { useCreateInviteLinkMutation } from '../../../hooks/useInviteLink';
-import { useApp } from '../../../providers/AppProvider';
-import { TrackPage, useTracking } from '../../../providers/TrackingProvider';
+import useApp from '../../../providers/App/useApp';
+import { TrackPage } from '../../../providers/Tracking/TrackingProvider';
+import useTracking from '../../../providers/Tracking/useTracking';
 import {
     CategoryName,
     EventName,
@@ -30,10 +32,11 @@ const InvitesModal: FC<{
             email: '',
             role: OrganizationMemberRole.EDITOR,
         },
-        validate: {
-            email: (value: string) =>
-                validateEmail(value) ? null : 'Your email address is not valid',
-        },
+        validate: zodResolver(
+            z.object({
+                email: getEmailSchema(),
+            }),
+        ),
     });
     const { track } = useTracking();
     const { health, user } = useApp();

@@ -1,10 +1,10 @@
 import {
-    ConditionalRule,
     FilterOperator,
     isFilterRule,
+    type ConditionalRule,
 } from '@lightdash/common';
 import { Select } from '@mantine/core';
-import { FilterInputsProps } from '.';
+import { type FilterInputsProps } from '.';
 import { getPlaceholderByFilterTypeAndOperator } from '../utils/getPlaceholderByFilterTypeAndOperator';
 import DefaultFilterInputs from './DefaultFilterInputs';
 
@@ -31,6 +31,8 @@ const BooleanFilterInputs = <T extends ConditionalRule>(
                     onDropdownOpen={popoverProps?.onOpen}
                     onDropdownClose={popoverProps?.onClose}
                     disabled={disabled}
+                    autoFocus={true}
+                    initiallyOpened={true}
                     placeholder={placeholder}
                     data={[
                         { value: 'true', label: 'True' },

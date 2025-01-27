@@ -1,9 +1,18 @@
 import {
-    fieldId as getFieldId,
+    canApplyFormattingToCustomMetric,
+    CustomFormatType,
     friendlyName,
+    getFilterableDimensionsFromItemsMap,
+    getItemId,
     isAdditionalMetric,
+    isCustomDimension,
     isDimension,
     MetricType,
+    NumberSeparator,
+    type AdditionalMetric,
+    type CustomFormat,
+    type Dimension,
+    type FilterableDimension,
 } from '@lightdash/common';
 import {
     Accordion,
@@ -16,13 +25,15 @@ import {
     Title,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ValueOf } from 'type-fest';
 import { v4 as uuidv4 } from 'uuid';
 import useToaster from '../../../hooks/toaster/useToaster';
 import { useExplore } from '../../../hooks/useExplore';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
-import { FiltersProvider } from '../../common/Filters/FiltersProvider';
-import { FilterForm, MetricFilterRuleWithFieldId } from './FilterForm';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import FiltersProvider from '../../common/Filters/FiltersProvider';
+import { FormatForm } from '../FormatForm';
+import { FilterForm, type MetricFilterRuleWithFieldId } from './FilterForm';
 import { useDataForFiltersProvider } from './hooks/useDataForFiltersProvider';
 import {
     addFieldIdToMetricFilterRule,
@@ -55,6 +66,21 @@ export const CustomMetricModal = () => {
 
     const { data: exploreData } = useExplore(tableName);
 
+    let dimensionToCheck: Dimension | undefined;
+
+    if (isDimension(item)) {
+        dimensionToCheck = item;
+    }
+    if (isEditing && isAdditionalMetric(item) && item.baseDimensionName) {
+        dimensionToCheck =
+            exploreData?.tables[item.table]?.dimensions[item.baseDimensionName];
+    }
+
+    const canApplyFormatting =
+        dimensionToCheck &&
+        customMetricType &&
+        canApplyFormattingToCustomMetric(dimensionToCheck, customMetricType);
+
     const additionalMetrics = useExplorerContext(
         (context) =>
             context.state.unsavedChartVersion.metricQuery.additionalMetrics,
@@ -62,11 +88,27 @@ export const CustomMetricModal = () => {
 
     const { projectUuid, fieldsMap, startOfWeek } = useDataForFiltersProvider();
 
-    const form = useForm({
+    const dimensionsMap = getFilterableDimensionsFromItemsMap(fieldsMap);
+
+    const form = useForm<
+        Pick<AdditionalMetric, 'percentile'> & {
+            format: CustomFormat;
+            customMetricLabel: string;
+        }
+    >({
         validateInputOnChange: true,
         initialValues: {
             customMetricLabel: '',
             percentile: 50,
+            format: {
+                type: CustomFormatType.DEFAULT,
+                round: undefined,
+                separator: NumberSeparator.DEFAULT,
+                currency: undefined,
+                compact: undefined,
+                prefix: undefined,
+                suffix: undefined,
+            },
         },
         validate: {
             customMetricLabel: (label) => {
@@ -75,6 +117,7 @@ export const CustomMetricModal = () => {
                 if (!item) return null;
 
                 const metricName = getCustomMetricName(
+                    item.table,
                     label,
                     isEditing &&
                         isAdditionalMetric(item) &&
@@ -94,7 +137,7 @@ export const CustomMetricModal = () => {
                     ? 'Metric with this label already exists'
                     : null;
             },
-            percentile: (percentile: number) => {
+            percentile: (percentile) => {
                 if (!percentile) return null;
                 if (percentile < 0 || percentile > 100) {
                     return 'Percentile must be a number between 0 and 100';
@@ -107,23 +150,16 @@ export const CustomMetricModal = () => {
     useEffect(() => {
         if (!item || !customMetricType) return;
 
-        if (item.label && customMetricType) {
+        const label = isCustomDimension(item) ? item.name : item.label;
+        if (label && customMetricType) {
             setFieldValue(
                 'customMetricLabel',
                 isEditing
-                    ? item.label
+                    ? label
                     : customMetricType
-                    ? `${friendlyName(customMetricType)} of ${item.label}`
+                    ? `${friendlyName(customMetricType)} of ${label}`
                     : '',
             );
-        }
-
-        if (
-            isEditing &&
-            isAdditionalMetric(item) &&
-            item.percentile !== undefined
-        ) {
-            setFieldValue('percentile', item.percentile);
         }
     }, [setFieldValue, item, customMetricType, isEditing]);
 
@@ -146,8 +182,27 @@ export const CustomMetricModal = () => {
         setCustomMetricFiltersWithIds(initialCustomMetricFiltersWithIds);
     }, [initialCustomMetricFiltersWithIds]);
 
+    useEffect(
+        function populateForm() {
+            if (isEditing && isAdditionalMetric(item)) {
+                if (item.percentile)
+                    setFieldValue('percentile', item.percentile);
+
+                if (item.formatOptions) {
+                    setFieldValue('format', item.formatOptions);
+                }
+            }
+        },
+        [isEditing, item, setFieldValue],
+    );
+
+    const handleClose = useCallback(() => {
+        form.reset();
+        toggleModal();
+    }, [form, toggleModal]);
+
     const handleOnSubmit = form.onSubmit(
-        ({ customMetricLabel, percentile }) => {
+        ({ customMetricLabel, percentile, format }) => {
             if (!item || !customMetricType) return;
 
             const data = prepareCustomMetricData({
@@ -158,6 +213,7 @@ export const CustomMetricModal = () => {
                 isEditingCustomMetric: !!isEditing,
                 exploreData,
                 percentile,
+                formatOptions: format,
             });
 
             if (isEditing && isAdditionalMetric(item)) {
@@ -166,7 +222,7 @@ export const CustomMetricModal = () => {
                         ...item,
                         ...data,
                     },
-                    getFieldId(item),
+                    getItemId(item),
                 );
                 showToastSuccess({
                     title: 'Custom metric edited successfully',
@@ -180,14 +236,23 @@ export const CustomMetricModal = () => {
                 showToastSuccess({
                     title: 'Custom metric added successfully',
                 });
+            } else if (isCustomDimension(item)) {
+                addAdditionalMetric({
+                    uuid: uuidv4(),
+                    // Do not add baseDimensionName to avoid invalid validation errors in queryBuilder
+                    ...data,
+                });
+                showToastSuccess({
+                    title: 'Custom metric added successfully',
+                });
             }
-            toggleModal();
+            handleClose();
         },
     );
 
     const defaultFilterRuleFieldId = useMemo(() => {
         if (item) {
-            if (!isEditing) return getFieldId(item);
+            if (!isEditing) return getItemId(item);
 
             if (
                 isEditing &&
@@ -199,12 +264,20 @@ export const CustomMetricModal = () => {
         }
     }, [isEditing, item]);
 
+    const getFormatInputProps = (path: keyof CustomFormat) =>
+        form.getInputProps(`format.${path}`);
+
+    const setFormatFieldValue = (
+        path: keyof CustomFormat,
+        value: ValueOf<CustomFormat>,
+    ) => form.setFieldValue(`format.${path}`, value);
+
     return item ? (
         <Modal
             size="xl"
             onClick={(e) => e.stopPropagation()}
             opened={isOpen}
-            onClose={() => toggleModal(undefined)}
+            onClose={handleClose}
             title={
                 <Title order={4}>
                     {isEditing ? 'Edit' : 'Create'} Custom Metric
@@ -230,6 +303,24 @@ export const CustomMetricModal = () => {
                         />
                     )}
                     <Accordion chevronPosition="left" chevronSize="xs">
+                        {canApplyFormatting && (
+                            <Accordion.Item value="format">
+                                <Accordion.Control>
+                                    <Text fw={500} fz="sm">
+                                        Format
+                                    </Text>
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                    <FormatForm
+                                        formatInputProps={getFormatInputProps}
+                                        format={form.values.format}
+                                        setFormatFieldValue={
+                                            setFormatFieldValue
+                                        }
+                                    />
+                                </Accordion.Panel>
+                            </Accordion.Item>
+                        )}
                         <Accordion.Item value="filters">
                             <Accordion.Control>
                                 <Text fw={500} fz="sm">
@@ -245,9 +336,11 @@ export const CustomMetricModal = () => {
                                 </Text>
                             </Accordion.Control>
                             <Accordion.Panel>
-                                <FiltersProvider
+                                <FiltersProvider<
+                                    Record<string, FilterableDimension>
+                                >
                                     projectUuid={projectUuid}
-                                    fieldsMap={fieldsMap}
+                                    itemsMap={dimensionsMap}
                                     startOfWeek={startOfWeek ?? undefined}
                                     popoverProps={{
                                         withinPortal: true,

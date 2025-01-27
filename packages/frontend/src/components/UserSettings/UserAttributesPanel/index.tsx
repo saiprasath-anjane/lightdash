@@ -1,5 +1,5 @@
 import { subject } from '@casl/ability';
-import { UserAttribute } from '@lightdash/common';
+import { FeatureFlags, type UserAttribute } from '@lightdash/common';
 import {
     ActionIcon,
     Box,
@@ -20,15 +20,15 @@ import {
     IconPlus,
     IconTrash,
 } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
-import { FC, useState } from 'react';
+import { useState, type FC } from 'react';
 import { useOrganization } from '../../../hooks/organization/useOrganization';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
+import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import {
     useUserAttributes,
     useUserAttributesDeleteMutation,
 } from '../../../hooks/useUserAttributes';
-import { useApp } from '../../../providers/AppProvider';
+import useApp from '../../../providers/App/useApp';
 import LoadingState from '../../common/LoadingState';
 import MantineIcon from '../../common/MantineIcon';
 import { SettingsCard } from '../../common/Settings/SettingsCard';
@@ -38,7 +38,8 @@ import UserAttributeModal from './UserAttributeModal';
 const UserListItem: FC<{
     orgUserAttribute: UserAttribute;
     onEdit: () => void;
-}> = ({ orgUserAttribute, onEdit }) => {
+    isGroupManagementEnabled?: boolean;
+}> = ({ orgUserAttribute, onEdit, isGroupManagementEnabled }) => {
     const [isDeleteDialogOpen, deleteDialog] = useDisclosure(false);
     const { mutate: deleteUserAttribute } = useUserAttributesDeleteMutation();
 
@@ -62,10 +63,20 @@ const UserListItem: FC<{
                             </Tooltip>
                         )}
                     </Group>
-                    <Text fz="xs" color="gray.6">
-                        {orgUserAttribute.users.length} user
-                        {orgUserAttribute.users.length != 1 ? 's' : ''}
-                    </Text>
+                    <Group spacing="sm">
+                        <Text fz="xs" color="gray.6">
+                            {orgUserAttribute.users.length} user
+                            {orgUserAttribute.users.length !== 1 ? 's' : ''}
+                        </Text>
+                        {isGroupManagementEnabled && (
+                            <Text fz="xs" color="gray.6">
+                                {orgUserAttribute.groups.length} group
+                                {orgUserAttribute.groups.length !== 1
+                                    ? 's'
+                                    : ''}
+                            </Text>
+                        )}
+                    </Group>
                 </Stack>
             </td>
             <td width="1%">
@@ -129,16 +140,18 @@ const UserListItem: FC<{
 };
 
 const UserAttributesPanel: FC = () => {
-    const isGroupsFeatureFlagEnabled =
-        useFeatureFlagEnabled('group-management');
     const { classes } = useTableStyles();
     const { user } = useApp();
+    const { data: UserGroupsFeatureFlag } = useFeatureFlag(
+        FeatureFlags.UserGroupsEnabled,
+    );
     const [showAddAttributeModal, addAttributeModal] = useDisclosure(false);
 
     const [editAttribute, setEditAttribute] = useState<
         UserAttribute | undefined
     >();
-    const { data: orgUserAttributes, isLoading } = useUserAttributes();
+
+    const { data: orgUserAttributes, isInitialLoading } = useUserAttributes();
     const { data: organization } = useOrganization();
     if (
         user.data?.ability.cannot(
@@ -151,15 +164,20 @@ const UserAttributesPanel: FC = () => {
         return <ForbiddenPanel />;
     }
 
-    if (isLoading) return <LoadingState title="Loading user attributes" />;
+    if (isInitialLoading)
+        return <LoadingState title="Loading user attributes" />;
+
+    if (!user.data || !UserGroupsFeatureFlag) return null;
+
+    const isGroupManagementEnabled = UserGroupsFeatureFlag?.enabled;
 
     return (
         <Stack>
             <Group position="apart">
                 <Group spacing="two">
                     <Title order={5}>
-                        {isGroupsFeatureFlagEnabled
-                            ? 'User and Group attributes'
+                        {isGroupManagementEnabled
+                            ? 'User and group attributes'
                             : 'User attributes'}
                     </Title>
                     <Tooltip
@@ -202,7 +220,7 @@ const UserAttributesPanel: FC = () => {
                 </>
             </Group>
 
-            {isLoading ? (
+            {isInitialLoading ? (
                 <LoadingState title="Loading user attributes" />
             ) : orgUserAttributes?.length === 0 ? (
                 <SettingsCard shadow="none">
@@ -225,6 +243,9 @@ const UserAttributesPanel: FC = () => {
                                     orgUserAttribute={orgUserAttribute}
                                     onEdit={() =>
                                         setEditAttribute(orgUserAttribute)
+                                    }
+                                    isGroupManagementEnabled={
+                                        isGroupManagementEnabled
                                     }
                                 />
                             ))}

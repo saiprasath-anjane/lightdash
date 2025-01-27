@@ -9,6 +9,7 @@ import {
     isTableValidationError,
     ParameterError,
     SchedulerJobStatus,
+    ValidationTarget,
 } from '@lightdash/common';
 import columnify from 'columnify';
 import { getConfig } from '../config';
@@ -20,11 +21,12 @@ import { checkLightdashVersion, lightdashApi } from './dbt/apiClient';
 const requestValidation = async (
     projectUuid: string,
     explores: (Explore | ExploreError)[],
+    validationTargets: ValidationTarget[],
 ) =>
     lightdashApi<ApiJobScheduledResponse['results']>({
         method: 'POST',
         url: `/api/v1/projects/${projectUuid}/validate`,
-        body: JSON.stringify({ explores }),
+        body: JSON.stringify({ explores, validationTargets }),
     });
 
 const getJobState = async (jobUuid: string) =>
@@ -52,6 +54,8 @@ const REFETCH_JOB_INTERVAL = 3000;
 type ValidateHandlerOptions = CompileHandlerOptions & {
     project?: string;
     verbose: boolean;
+    preview: boolean;
+    only: ValidationTarget[];
 };
 
 const waitUntilFinished = async (jobUuid: string): Promise<string> => {
@@ -75,7 +79,10 @@ export const validateHandler = async (options: ValidateHandlerOptions) => {
     const explores = await compile(options);
     GlobalState.debug(`> Compiled ${explores.length} explores`);
 
-    const projectUuid = options.project || config.context?.project;
+    const selectedProject = options.preview
+        ? config.context?.previewProject
+        : config.context?.project;
+    const projectUuid = options.project || selectedProject;
 
     if (projectUuid === undefined) {
         throw new ParameterError(
@@ -89,24 +96,30 @@ export const validateHandler = async (options: ValidateHandlerOptions) => {
         );
     }
 
-    if (options.project) {
-        console.error(`Validating project ${projectUuid}\n`);
-    } else if (config.context?.previewProject) {
+    if (projectUuid === config.context?.previewProject) {
         console.error(
             `Validating preview project ${styles.bold(
                 config.context?.previewName,
             )}\n`,
         );
-    } else {
+    } else if (projectUuid === config.context?.project) {
         console.error(
-            `Validating project ${styles.bold(
+            `Validating default project ${styles.bold(
                 config.context?.projectName || projectUuid,
             )}\n`,
         );
+    } else {
+        console.error(`Validating project ${projectUuid}\n`);
     }
 
     const timeStart = new Date();
-    const validationJob = await requestValidation(projectUuid, explores);
+    const validationTargets = options.only ? options.only : [];
+    const validationJob = await requestValidation(
+        projectUuid,
+        explores,
+        validationTargets,
+    );
+
     const { jobId } = validationJob;
 
     const spinner = GlobalState.startSpinner(
@@ -130,12 +143,39 @@ export const validateHandler = async (options: ValidateHandlerOptions) => {
         const tableErrors = validation.filter(isTableValidationError);
         const chartErrors = validation.filter(isChartValidationError);
         const dashboardErrors = validation.filter(isDashboardValidationError);
+        const validationTargetsSet = new Set(validationTargets);
+        const hasValidationTargets = validationTargetsSet.size > 0;
 
-        console.error(`
-- Tables: ${styles.bold(tableErrors.length)} errors
-- Charts: ${styles.bold(chartErrors.length)} errors
-- Dashboards: ${styles.bold(dashboardErrors.length)} errors
-        `);
+        console.error('\n');
+
+        if (
+            !hasValidationTargets ||
+            validationTargetsSet.has(ValidationTarget.TABLES)
+        ) {
+            console.error(
+                `- Tables: ${styles.bold(tableErrors.length)} errors`,
+            );
+        }
+
+        if (
+            !hasValidationTargets ||
+            validationTargetsSet.has(ValidationTarget.CHARTS)
+        ) {
+            console.error(
+                `- Charts: ${styles.bold(chartErrors.length)} errors`,
+            );
+        }
+
+        if (
+            !hasValidationTargets ||
+            validationTargetsSet.has(ValidationTarget.DASHBOARDS)
+        ) {
+            console.error(
+                `- Dashboards: ${styles.bold(dashboardErrors.length)} errors`,
+            );
+        }
+
+        console.error('\n');
 
         const validationOutput = validation.map((v) => ({
             name: styles.error(v.name),

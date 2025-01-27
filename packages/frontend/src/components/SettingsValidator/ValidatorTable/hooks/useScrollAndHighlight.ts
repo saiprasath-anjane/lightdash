@@ -1,8 +1,8 @@
-import { MantineThemeColors } from '@mantine/core';
-import { RefObject, useEffect } from 'react';
+import { type MantineThemeColors } from '@mantine/core';
+import { useEffect, type RefObject } from 'react';
 
 export const useScrollAndHighlight = (
-    refs: { [key: string]: RefObject<HTMLTableRowElement> },
+    refs: { [key: string]: RefObject<HTMLTableRowElement | null> },
     validationId: string | null,
     colors: MantineThemeColors,
 ) => {

@@ -1,13 +1,13 @@
 import { DbtProjectType } from '@lightdash/common';
 import { Anchor, PasswordInput, TextInput } from '@mantine/core';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
     hasNoWhiteSpaces,
     isGitRepository,
     startWithSlash,
 } from '../../../utils/fieldValidators';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 
 const BitBucketForm: FC<{ disabled: boolean }> = ({ disabled }) => {
     const { savedProject } = useProjectFormContext();

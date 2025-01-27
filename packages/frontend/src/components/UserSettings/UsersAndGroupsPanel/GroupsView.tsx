@@ -1,33 +1,45 @@
-import { GroupWithMembers } from '@lightdash/common';
+import { isGroupWithMembers, type GroupWithMembers } from '@lightdash/common';
 import {
+    ActionIcon,
     Badge,
     Button,
     Group,
     Modal,
-    ModalProps,
+    Paper,
     Stack,
     Table,
     Text,
+    TextInput,
     Title,
+    type ModalProps,
 } from '@mantine/core';
-import { IconAlertCircle, IconPlus, IconTrash } from '@tabler/icons-react';
-import { FC, useCallback, useState } from 'react';
+import {
+    IconAlertCircle,
+    IconEdit,
+    IconPlus,
+    IconTrash,
+    IconX,
+} from '@tabler/icons-react';
+import { useCallback, useState, type FC } from 'react';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
 import {
     useGroupDeleteMutation,
     useOrganizationGroups,
 } from '../../../hooks/useOrganizationGroups';
-import { useApp } from '../../../providers/AppProvider';
+import useApp from '../../../providers/App/useApp';
 import LoadingState from '../../common/LoadingState';
 import MantineIcon from '../../common/MantineIcon';
 import { SettingsCard } from '../../common/Settings/SettingsCard';
 import CreateGroupModal from './CreateGroupModal';
 
+const GROUP_MEMBERS_PER_PAGE = 2000;
+
 const GroupListItem: FC<{
     disabled?: boolean;
     group: GroupWithMembers;
     onDelete: (group: GroupWithMembers) => void;
-}> = ({ disabled, group, onDelete }) => {
+    onEdit: (group: GroupWithMembers) => void;
+}> = ({ disabled, group, onDelete, onEdit }) => {
     return (
         <tr>
             <td width={260}>
@@ -40,7 +52,7 @@ const GroupListItem: FC<{
             </td>
 
             <td>
-                {group.members.length > 0 ? (
+                {group?.members.length > 0 ? (
                     <Group
                         spacing="xxs"
                         maw={400}
@@ -75,6 +87,14 @@ const GroupListItem: FC<{
             </td>
             <td>
                 <Group position="right">
+                    <Button
+                        px="xs"
+                        variant="outline"
+                        onClick={() => onEdit(group)}
+                        disabled={disabled}
+                    >
+                        <MantineIcon icon={IconEdit} />
+                    </Button>
                     <Button
                         px="xs"
                         variant="outline"
@@ -134,7 +154,11 @@ const GroupsView: FC = () => {
     const { classes } = useTableStyles();
     const { user } = useApp();
 
-    const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+    const [showCreateAndEditModal, setShowCreateAndEditModal] = useState(false);
+
+    const [groupToEdit, setGroupToEdit] = useState<
+        GroupWithMembers | undefined
+    >(undefined);
 
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [groupToDelete, setGroupToDelete] = useState<
@@ -143,8 +167,13 @@ const GroupsView: FC = () => {
 
     const { mutate, isLoading: isDeleting } = useGroupDeleteMutation();
 
-    const { data: groups, isLoading: isLoadingGroups } =
-        useOrganizationGroups(100); // TODO: pagination
+    const [search, setSearch] = useState('');
+
+    const { data: groups, isInitialLoading: isLoadingGroups } =
+        useOrganizationGroups({
+            searchInput: search,
+            includeMembers: GROUP_MEMBERS_PER_PAGE, // TODO: pagination
+        });
 
     const handleDelete = useCallback(() => {
         if (groupToDelete) {
@@ -158,18 +187,35 @@ const GroupsView: FC = () => {
     }
 
     return (
-        <Stack spacing="xs" mt="xs">
-            {user.data?.ability?.can('manage', 'Group') && (
-                <Button
-                    compact
-                    leftIcon={<MantineIcon icon={IconPlus} />}
-                    onClick={() => setShowCreateGroupModal(true)}
-                    sx={{ alignSelf: 'end' }}
-                >
-                    Add group
-                </Button>
-            )}
+        <Stack spacing="xs">
             <SettingsCard shadow="none" p={0}>
+                <Paper p="sm" radius={0}>
+                    <Group align="center" position="apart">
+                        <TextInput
+                            size="xs"
+                            placeholder="Search groups by name, members or member email "
+                            onChange={(e) => setSearch(e.target.value)}
+                            value={search}
+                            w={320}
+                            rightSection={
+                                search.length > 0 && (
+                                    <ActionIcon onClick={() => setSearch('')}>
+                                        <MantineIcon icon={IconX} />
+                                    </ActionIcon>
+                                )
+                            }
+                        />
+                        {user.data?.ability?.can('manage', 'Group') && (
+                            <Button
+                                compact
+                                leftIcon={<MantineIcon icon={IconPlus} />}
+                                onClick={() => setShowCreateAndEditModal(true)}
+                            >
+                                Add group
+                            </Button>
+                        )}
+                    </Group>
+                </Paper>
                 <Table className={classes.root}>
                     <thead>
                         <tr>
@@ -179,28 +225,54 @@ const GroupsView: FC = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {groups?.map((group) => (
-                            <GroupListItem
-                                key={group.uuid}
-                                group={group}
-                                disabled={user.data?.ability?.cannot(
-                                    'manage',
-                                    'Group',
-                                )}
-                                onDelete={(groupForDeletion) => {
-                                    setGroupToDelete(groupForDeletion);
-                                    setIsDeleteDialogOpen(true);
-                                }}
-                            />
-                        ))}
+                        {groups && groups.length ? (
+                            groups.map((group) => {
+                                if (!isGroupWithMembers(group)) {
+                                    return null;
+                                }
+                                return (
+                                    <GroupListItem
+                                        key={group.uuid}
+                                        group={group}
+                                        disabled={user.data?.ability?.cannot(
+                                            'manage',
+                                            'Group',
+                                        )}
+                                        onEdit={(g) => {
+                                            setGroupToEdit(g);
+                                            setShowCreateAndEditModal(true);
+                                        }}
+                                        onDelete={(groupForDeletion) => {
+                                            setGroupToDelete(groupForDeletion);
+                                            setIsDeleteDialogOpen(true);
+                                        }}
+                                    />
+                                );
+                            })
+                        ) : (
+                            <tr>
+                                <td colSpan={3}>
+                                    <Text c="gray.6" fs="italic" ta="center">
+                                        No groups found
+                                    </Text>
+                                </td>
+                            </tr>
+                        )}
                     </tbody>
                 </Table>
             </SettingsCard>
-            <CreateGroupModal
-                key={`create-group-modal-${showCreateGroupModal}`}
-                opened={showCreateGroupModal}
-                onClose={() => setShowCreateGroupModal(false)}
-            />
+            {showCreateAndEditModal && (
+                <CreateGroupModal
+                    key={`create-group-modal-${showCreateAndEditModal}`}
+                    opened={showCreateAndEditModal}
+                    onClose={() => {
+                        setShowCreateAndEditModal(false);
+                        setGroupToEdit(undefined);
+                    }}
+                    groupToEdit={groupToEdit}
+                    isEditing={groupToEdit !== undefined}
+                />
+            )}
             <DeleteGroupModal
                 key={`delete-group-modal-${isDeleteDialogOpen}`}
                 opened={isDeleteDialogOpen}

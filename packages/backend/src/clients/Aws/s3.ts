@@ -5,11 +5,14 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { MissingConfigError } from '@lightdash/common';
 import * as Sentry from '@sentry/node';
+import { ReadStream } from 'fs';
+import { PassThrough, Readable } from 'stream';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
 
-type ClientDependencies = {
+type S3ClientArguments = {
     lightdashConfig: LightdashConfig;
 };
 
@@ -18,7 +21,7 @@ export class S3Client {
 
     private readonly s3?: S3;
 
-    constructor({ lightdashConfig }: ClientDependencies) {
+    constructor({ lightdashConfig }: S3ClientArguments) {
         this.lightdashConfig = lightdashConfig;
 
         if (lightdashConfig.s3?.endpoint && lightdashConfig.s3.region) {
@@ -53,8 +56,8 @@ export class S3Client {
         urlOptions?: { expiresIn: number },
     ): Promise<string> {
         if (!this.lightdashConfig.s3?.bucket || this.s3 === undefined) {
-            throw new Error(
-                "Missing S3 bucket configuration, can't upload image",
+            throw new MissingConfigError(
+                "Missing S3 bucket configuration, can't upload files",
             );
         }
         const upload = new Upload({
@@ -94,6 +97,10 @@ export class S3Client {
         }
     }
 
+    async uploadPdf(pdf: Buffer, id: string): Promise<string> {
+        return this.uploadFile(`${id}.pdf`, pdf, 'application/pdf');
+    }
+
     async uploadImage(image: Buffer, imageId: string): Promise<string> {
         return this.uploadFile(`${imageId}.png`, image, 'image/png');
     }
@@ -103,6 +110,72 @@ export class S3Client {
         csvName: string,
     ): Promise<string> {
         return this.uploadFile(csvName, csv, 'text/csv');
+    }
+
+    async uploadZip(zip: ReadStream, zipName: string): Promise<string> {
+        return this.uploadFile(zipName, zip, 'application/zip');
+    }
+
+    /*
+    This method streams the results into an s3 object
+    It returns a function to call when the streaming ends,then it returns the signed url of the object uploaded
+    */
+    async streamResults(
+        buffer: PassThrough,
+        fileId: string,
+    ): Promise<() => Promise<string>> {
+        if (!this.lightdashConfig.s3?.bucket || this.s3 === undefined) {
+            throw new MissingConfigError(
+                "Missing S3 bucket configuration, can't upload files",
+            );
+        }
+        const upload = new Upload({
+            client: this.s3,
+            params: {
+                Bucket: this.lightdashConfig.s3.bucket,
+                Key: fileId,
+                Body: buffer,
+                ContentType: `application/jsonl`,
+                ACL: 'private',
+                ContentDisposition: `attachment; filename="${fileId}"`,
+            },
+        });
+
+        const onEnd = async () => {
+            try {
+                await upload.done();
+                return fileId; // We don't need to return signed url, we will stream the file from the fileId
+            } catch (error) {
+                Logger.error(
+                    `Failed to upload file to s3 with endpoint: ${
+                        this.lightdashConfig.s3!.endpoint ?? 'no endpoint'
+                    }. ${error}`,
+                );
+                Sentry.captureException(error);
+
+                throw error;
+            }
+        };
+
+        return onEnd;
+    }
+
+    async getS3FileStream(fileId: string): Promise<Readable> {
+        const command = new GetObjectCommand({
+            Bucket: this.lightdashConfig.s3!.bucket,
+            Key: fileId,
+        });
+
+        try {
+            const response = await this.s3?.send(command);
+            if (response === undefined) {
+                throw new Error('No response from S3');
+            }
+            return response.Body as Readable;
+        } catch (error) {
+            console.error('Error fetching the file from S3:', error);
+            throw error;
+        }
     }
 
     isEnabled(): boolean {

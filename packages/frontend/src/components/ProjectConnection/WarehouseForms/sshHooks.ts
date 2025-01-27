@@ -1,12 +1,12 @@
-import { ApiError, ApiSshKeyPairResponse } from '@lightdash/common';
-import { useMutation, UseMutationOptions } from 'react-query';
+import { type ApiError, type ApiSshKeyPairResponse } from '@lightdash/common';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import { lightdashApi } from '../../../api';
 import useToaster from '../../../hooks/toaster/useToaster';
 
 export const useCreateSshKeyPair = (
     options: UseMutationOptions<ApiSshKeyPairResponse['results'], ApiError>,
 ) => {
-    const { showToastError } = useToaster();
+    const { showToastApiError } = useToaster();
     return useMutation<ApiSshKeyPairResponse['results'], ApiError>(
         async () =>
             lightdashApi({
@@ -15,11 +15,11 @@ export const useCreateSshKeyPair = (
                 body: undefined,
             }),
         {
-            mutationKey: 'activeSshKeypair',
-            onError: (error) => {
-                showToastError({
+            mutationKey: ['activeSshKeypair'],
+            onError: ({ error }) => {
+                showToastApiError({
                     title: 'Failed to create SSH keypair',
-                    subtitle: error.error.message,
+                    apiError: error,
                 });
             },
             ...options,

@@ -1,16 +1,16 @@
-import { TableCalculation } from '@lightdash/common';
+import { type TableCalculation } from '@lightdash/common';
 import {
     Button,
     Group,
     Modal,
-    ModalProps,
     Stack,
     Text,
     Title,
+    type ModalProps,
 } from '@mantine/core';
-import { FC } from 'react';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
-import { useTracking } from '../../../providers/TrackingProvider';
+import { type FC } from 'react';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 
 type Props = Pick<ModalProps, 'onClose'> & {

@@ -1,6 +1,6 @@
 import { TextInput } from '@mantine/core';
 import cronstrue from 'cronstrue';
-import React, { FC, useMemo } from 'react';
+import React, { useMemo, type FC } from 'react';
 import { isInvalidCronExpression } from '../../../utils/fieldValidators';
 
 const CustomInputs: FC<{
@@ -28,6 +28,7 @@ const CustomInputs: FC<{
 
     return (
         <TextInput
+            maw="350px"
             withAsterisk
             value={cronExpression}
             placeholder="0 9 * * 1"

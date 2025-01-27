@@ -15,12 +15,15 @@ export enum TimeFrames {
     DAY_OF_WEEK_INDEX = 'DAY_OF_WEEK_INDEX',
     DAY_OF_MONTH_NUM = 'DAY_OF_MONTH_NUM',
     DAY_OF_YEAR_NUM = 'DAY_OF_YEAR_NUM',
+    WEEK_NUM = 'WEEK_NUM',
     MONTH_NUM = 'MONTH_NUM',
     QUARTER_NUM = 'QUARTER_NUM',
     YEAR_NUM = 'YEAR_NUM',
     DAY_OF_WEEK_NAME = 'DAY_OF_WEEK_NAME',
     MONTH_NAME = 'MONTH_NAME',
     QUARTER_NAME = 'QUARTER_NAME',
+    HOUR_OF_DAY_NUM = 'HOUR_OF_DAY_NUM',
+    MINUTE_OF_HOUR_NUM = 'MINUTE_OF_HOUR_NUM',
 }
 
 export enum DateGranularity {
@@ -40,4 +43,9 @@ export const dateGranularityToTimeFrameMap: Record<
     [DateGranularity.MONTH]: TimeFrames.MONTH,
     [DateGranularity.QUARTER]: TimeFrames.QUARTER,
     [DateGranularity.YEAR]: TimeFrames.YEAR,
+};
+
+export type DefaultTimeDimension = {
+    field: string;
+    interval: TimeFrames;
 };

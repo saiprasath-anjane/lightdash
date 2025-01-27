@@ -41,7 +41,7 @@ Controllers are responsible for handling the request and response from the API. 
 be as thin as possible, delegating the business logic to services.
 
 When making changes to a controller or the types used in a controller, you should also generate the
-corresponding HOA files. You can do it by running `yarn generate-api`.
+corresponding HOA files. You can do it by running `pnpm generate-api`.
 
 Guidelines:
 
@@ -102,10 +102,10 @@ Restrictions:
 
 Useful Development Scripts:
 
-- migrate database - `yarn workspace backend migrate`
-- rollback database - `yarn workspace backend rollback`
-- rollback last migration - `yarn workspace backend rollback-last`
-- create a new migration file - `yarn workspace backend create-migration <migration-name>`
+- migrate database - `pnpm -F backend migrate`
+- rollback database - `pnpm -F backend rollback`
+- rollback last migration - `pnpm -F backend rollback-last`
+- create a new migration file - `pnpm -F backend create-migration <migration-name>`
 
 #### Seeds
 
@@ -137,40 +137,3 @@ Restrictions:
 
 - Can't import anything
 
-## Open Telemetry
-
-With Jaeger you can debug open telemetry traces locally.
-
-### With docker-compose
-
-If you are using docker-compose.dev.yml you are already running jaeger in a container.
-You can open `http://localhost:16686` to explore traces.
-
-### Without docker-compose
-
-Run jaeger in docker:
-```
-docker run --rm --name jaeger \
-  -e COLLECTOR_ZIPKIN_HOST_PORT=:9411 \
-  -p 6831:6831/udp \
-  -p 6832:6832/udp \
-  -p 5778:5778 \
-  -p 16686:16686 \
-  -p 4317:4317 \
-  -p 4318:4318 \
-  -p 14250:14250 \
-  -p 14268:14268 \
-  -p 14269:14269 \
-  -p 9411:9411 \
-  jaegertracing/all-in-one:1.50
-```
-
-Set the following Lightdash env vars:
-```
-export OTEL_TRACES_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_SDK_DISABLED=false
-```
-
-You can open `http://localhost:16686` to explore traces.

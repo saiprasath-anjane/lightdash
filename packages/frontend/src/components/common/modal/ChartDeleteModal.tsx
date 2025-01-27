@@ -5,14 +5,14 @@ import {
     Group,
     List,
     Modal,
-    ModalProps,
     Stack,
     Text,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { FC } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { type FC } from 'react';
+import { Link, useParams } from 'react-router';
 import { useDashboardsContainingChart } from '../../../hooks/dashboard/useDashboards';
 import {
     useSavedQuery,
@@ -31,14 +31,16 @@ const ChartDeleteModal: FC<ChartDeleteModalProps> = ({
     ...modalProps
 }) => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { data: chart, isLoading } = useSavedQuery({ id: uuid });
-    const { data: relatedDashboards, isLoading: isLoadingRelatedDashboards } =
-        useDashboardsContainingChart(projectUuid, uuid);
+    const { data: chart, isInitialLoading } = useSavedQuery({ id: uuid });
+    const {
+        data: relatedDashboards,
+        isInitialLoading: isLoadingRelatedDashboards,
+    } = useDashboardsContainingChart(projectUuid, uuid);
     const { mutateAsync: deleteChart, isLoading: isDeleting } =
         useSavedQueryDeleteMutation();
 
     if (
-        isLoading ||
+        isInitialLoading ||
         isLoadingRelatedDashboards ||
         !chart ||
         !relatedDashboards

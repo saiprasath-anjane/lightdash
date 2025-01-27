@@ -1,15 +1,16 @@
-import { SavedChart } from '@lightdash/common';
+import { type SavedChart } from '@lightdash/common';
 import {
     Button,
     Group,
     Modal,
-    ModalProps,
     Stack,
+    Textarea,
     TextInput,
     Title,
+    type ModalProps,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { FC, useEffect } from 'react';
+import { useEffect, type FC } from 'react';
 import { useSavedQuery, useUpdateMutation } from '../../../hooks/useSavedQuery';
 import useSearchParams from '../../../hooks/useSearchParams';
 
@@ -26,7 +27,7 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
     ...modalProps
 }) => {
     const dashboardUuid = useSearchParams('fromDashboard');
-    const { data: chart, isLoading } = useSavedQuery({ id: uuid });
+    const { data: chart, isInitialLoading } = useSavedQuery({ id: uuid });
     const { mutateAsync, isLoading: isUpdating } = useUpdateMutation(
         dashboardUuid ? dashboardUuid : undefined,
         uuid,
@@ -49,7 +50,7 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
         });
     }, [chart, setValues]);
 
-    if (isLoading || !chart) {
+    if (isInitialLoading || !chart) {
         return null;
     }
 
@@ -66,17 +67,19 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
             <form title="Update Chart" onSubmit={handleConfirm}>
                 <Stack spacing="lg" pt="sm">
                     <TextInput
-                        label="Enter a memorable name for your chart"
+                        label="Chart name"
                         required
                         placeholder="eg. How many weekly active users do we have?"
                         disabled={isUpdating}
                         {...form.getInputProps('name')}
                     />
 
-                    <TextInput
+                    <Textarea
                         label="Chart description"
                         placeholder="A few words to give your team some context"
                         disabled={isUpdating}
+                        autosize
+                        maxRows={3}
                         {...form.getInputProps('description')}
                     />
 

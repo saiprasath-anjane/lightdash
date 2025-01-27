@@ -4,11 +4,10 @@ import React from 'react';
 import {
     COLLAPSABLE_CARD_BUTTON_PROPS,
     COLLAPSABLE_CARD_POPOVER_PROPS,
-} from '../../common/CollapsableCard';
+} from '../../common/CollapsableCard/constants';
 import MantineIcon from '../../common/MantineIcon';
-import { useVisualizationContext } from '../../LightdashVisualization/VisualizationProvider';
-
-import PieChartConfigTabs from './PieChartConfigTabs';
+import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
+import { ConfigTabs } from './PieChartConfigTabs';
 
 const PieChartConfig: React.FC = () => {
     const { resultsData } = useVisualizationContext();
@@ -30,7 +29,7 @@ const PieChartConfig: React.FC = () => {
 
             <Popover.Dropdown w={320}>
                 <Box w={320}>
-                    <PieChartConfigTabs />
+                    <ConfigTabs />
                 </Box>
             </Popover.Dropdown>
         </Popover>

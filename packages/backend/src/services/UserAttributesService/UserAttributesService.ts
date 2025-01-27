@@ -6,19 +6,27 @@ import {
     SessionUser,
     UserAttribute,
 } from '@lightdash/common';
-import { analytics } from '../../analytics/client';
-import { UserAttributeCreateAndUpdateEvent } from '../../analytics/LightdashAnalytics';
+import {
+    LightdashAnalytics,
+    UserAttributeCreateAndUpdateEvent,
+} from '../../analytics/LightdashAnalytics';
 import { UserAttributesModel } from '../../models/UserAttributesModel';
+import { BaseService } from '../BaseService';
 
-type Dependencies = {
+type UserAttributesServiceArguments = {
+    analytics: LightdashAnalytics;
     userAttributesModel: UserAttributesModel;
 };
 
-export class UserAttributesService {
+export class UserAttributesService extends BaseService {
+    private readonly analytics: LightdashAnalytics;
+
     private readonly userAttributesModel: UserAttributesModel;
 
-    constructor(dependencies: Dependencies) {
-        this.userAttributesModel = dependencies.userAttributesModel;
+    constructor(args: UserAttributesServiceArguments) {
+        super();
+        this.analytics = args.analytics;
+        this.userAttributesModel = args.userAttributesModel;
     }
 
     static getAnalyticsEventProperties(
@@ -32,6 +40,8 @@ export class UserAttributesService {
             values: {
                 userIds: attribute.users.map((u) => u.userUuid),
                 values: attribute.users.map((u) => u.value),
+                groupIds: attribute.groups.map((g) => g.groupUuid),
+                groupValues: attribute.groups.map((g) => g.value),
             },
             defaultValue: attribute.attributeDefault,
         };
@@ -56,7 +66,7 @@ export class UserAttributesService {
         });
 
         if (context === RequestMethod.WEB_APP) {
-            analytics.track({
+            this.analytics.track({
                 event: 'user_attributes.page_viewed',
                 userId: user.userUuid,
                 properties: {
@@ -87,7 +97,7 @@ export class UserAttributesService {
             orgAttribute,
         );
 
-        analytics.track({
+        this.analytics.track({
             event: 'user_attribute.created',
             userId: user.userUuid,
             properties:
@@ -124,7 +134,7 @@ export class UserAttributesService {
             orgAttribute,
         );
 
-        analytics.track({
+        this.analytics.track({
             event: 'user_attribute.updated',
             userId: user.userUuid,
             properties:
@@ -152,7 +162,7 @@ export class UserAttributesService {
         }
         await this.userAttributesModel.delete(orgAttributeUuid);
 
-        analytics.track({
+        this.analytics.track({
             event: 'user_attribute.deleted',
             userId: user.userUuid,
             properties: {

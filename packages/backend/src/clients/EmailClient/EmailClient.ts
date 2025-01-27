@@ -21,8 +21,17 @@ export type AttachmentUrl = {
     localPath: string;
     truncated: boolean;
 };
-type Dependencies = {
+type EmailClientArguments = {
     lightdashConfig: Pick<LightdashConfig, 'smtp' | 'siteUrl' | 'query'>;
+};
+
+type EmailTemplate = {
+    template: string;
+    context: Record<
+        string,
+        string | boolean | number | AttachmentUrl[] | undefined
+    >;
+    attachments?: (Mail.Attachment | AttachmentUrl)[] | undefined;
 };
 
 export default class EmailClient {
@@ -30,7 +39,7 @@ export default class EmailClient {
 
     transporter: nodemailer.Transporter | undefined;
 
-    constructor({ lightdashConfig }: Dependencies) {
+    constructor({ lightdashConfig }: EmailClientArguments) {
         this.lightdashConfig = lightdashConfig;
 
         if (this.lightdashConfig.smtp) {
@@ -63,8 +72,7 @@ export default class EmailClient {
                     from: `"${this.lightdashConfig.smtp.sender.name}" <${this.lightdashConfig.smtp.sender.email}>`,
                 },
             );
-
-            this.transporter.verify((error: any) => {
+            this.transporter.verify((error) => {
                 if (error) {
                     throw new SmptError(
                         `Failed to verify email transporter. ${error}`,
@@ -82,7 +90,7 @@ export default class EmailClient {
                 hbs({
                     viewEngine: {
                         partialsDir: path.join(__dirname, './templates/'),
-                        defaultLayout: false,
+                        defaultLayout: undefined,
                         extname: '.html',
                     },
                     viewPath: path.join(__dirname, './templates/'),
@@ -93,11 +101,8 @@ export default class EmailClient {
     }
 
     private async sendEmail(
-        options: Mail.Options & {
-            template: string;
-            context: Record<string, any>;
-        },
-    ) {
+        options: Mail.Options & EmailTemplate,
+    ): Promise<void> {
         if (this.transporter) {
             try {
                 const info = await this.transporter.sendMail(options);
@@ -193,8 +198,10 @@ export default class EmailClient {
         imageUrl: string,
         url: string,
         schedulerUrl: string,
+        includeLinks: boolean,
         pdfFile?: string,
         expirationDays?: number,
+        deliveryType: string = 'Scheduled delivery',
     ) {
         return this.sendEmail({
             to: recipient,
@@ -212,6 +219,8 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                deliveryType,
+                includeLinks,
             },
             text: title,
             attachments: pdfFile
@@ -237,6 +246,7 @@ export default class EmailClient {
         attachment: AttachmentUrl,
         url: string,
         schedulerUrl: string,
+        includeLinks: boolean,
         expirationDays?: number,
     ) {
         const csvUrl = attachment.path;
@@ -254,10 +264,12 @@ export default class EmailClient {
                 url,
                 csvUrl,
                 truncated: attachment.truncated,
+                noResults: attachment.path === '#no-results',
                 maxCells: this.lightdashConfig.query.csvCellsLimit,
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                includeLinks,
             },
             text: title,
         });
@@ -274,6 +286,7 @@ export default class EmailClient {
         attachments: AttachmentUrl[],
         url: string,
         schedulerUrl: string,
+        includeLinks: boolean,
         expirationDays?: number,
     ) {
         const csvUrls = attachments.filter(
@@ -303,6 +316,7 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                includeLinks,
             },
             text: title,
         });

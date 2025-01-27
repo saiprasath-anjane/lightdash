@@ -1,27 +1,28 @@
 import { subject } from '@casl/ability';
-import { Box, Stack, Text, Title } from '@mantine/core';
+import { FeatureFlags } from '@lightdash/common';
+import { Box, ScrollArea, Stack, Text, Title } from '@mantine/core';
 import {
     IconBuildingSkyscraper,
     IconCalendarStats,
     IconChecklist,
-    IconCloudSearch,
     IconDatabase,
     IconDatabaseCog,
+    IconDatabaseExport,
     IconKey,
+    IconLayersLinked,
     IconLock,
     IconPalette,
     IconPlug,
     IconReportAnalytics,
+    IconSql,
     IconTableOptions,
     IconUserCircle,
     IconUserPlus,
     IconUsers,
     IconUserShield,
 } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
-import { FC } from 'react';
-import { Redirect, Route, Switch } from 'react-router-dom';
-import { Can } from '../components/common/Authorization';
+import { useMemo, type FC } from 'react';
+import { Navigate, useRoutes, type RouteObject } from 'react-router';
 import ErrorState from '../components/common/ErrorState';
 import MantineIcon from '../components/common/MantineIcon';
 import Page from '../components/common/Page/Page';
@@ -31,9 +32,11 @@ import { SettingsGridCard } from '../components/common/Settings/SettingsCard';
 import PageSpinner from '../components/PageSpinner';
 import AccessTokensPanel from '../components/UserSettings/AccessTokensPanel';
 import AllowedDomainsPanel from '../components/UserSettings/AllowedDomainsPanel';
-import AppearancePanel from '../components/UserSettings/AppearancePanel';
+import AppearanceSettingsPanel from '../components/UserSettings/AppearanceSettingsPanel';
 import DefaultProjectPanel from '../components/UserSettings/DefaultProjectPanel';
 import { DeleteOrganizationPanel } from '../components/UserSettings/DeleteOrganizationPanel';
+import GithubSettingsPanel from '../components/UserSettings/GithubSettingsPanel';
+import { MyWarehouseConnectionsPanel } from '../components/UserSettings/MyWarehouseConnectionsPanel';
 import OrganizationPanel from '../components/UserSettings/OrganizationPanel';
 import PasswordPanel from '../components/UserSettings/PasswordPanel';
 import ProfilePanel from '../components/UserSettings/ProfilePanel';
@@ -44,38 +47,262 @@ import UserAttributesPanel from '../components/UserSettings/UserAttributesPanel'
 import UsersAndGroupsPanel from '../components/UserSettings/UsersAndGroupsPanel';
 import { useOrganization } from '../hooks/organization/useOrganization';
 import { useActiveProjectUuid } from '../hooks/useActiveProject';
+import {
+    useFeatureFlag,
+    useFeatureFlagEnabled,
+} from '../hooks/useFeatureFlagEnabled';
 import { useProject } from '../hooks/useProject';
-import { useApp } from '../providers/AppProvider';
-import { TrackPage, useTracking } from '../providers/TrackingProvider';
+import useApp from '../providers/App/useApp';
+import { TrackPage } from '../providers/Tracking/TrackingProvider';
+import useTracking from '../providers/Tracking/useTracking';
 import { EventName, PageName } from '../types/Events';
 import ProjectSettings from './ProjectSettings';
 
 const Settings: FC = () => {
-    // TODO: this is a feature flag while we are building groups.
-    // Remove this when groups are ready to be released.
-    const groupManagementEnabled = useFeatureFlagEnabled('group-management');
+    const isPassthroughLoginFeatureEnabled = useFeatureFlagEnabled(
+        FeatureFlags.PassthroughLogin,
+    );
+
+    const isCustomSQLEnabled = useFeatureFlagEnabled(
+        FeatureFlags.CustomSQLEnabled,
+    );
+
+    const isSemanticLayerEnabled = useFeatureFlagEnabled(
+        FeatureFlags.SemanticLayerEnabled,
+    );
 
     const {
         health: {
             data: health,
-            isLoading: isHealthLoading,
+            isInitialLoading: isHealthLoading,
             error: healthError,
         },
-        user: { data: user, isLoading: isUserLoading, error: userError },
+        user: { data: user, isInitialLoading: isUserLoading, error: userError },
     } = useApp();
+    const { data: UserGroupFeatureFlag } = useFeatureFlag(
+        FeatureFlags.UserGroupsEnabled,
+    );
     const { track } = useTracking();
     const {
         data: organization,
-        isLoading: isOrganizationLoading,
+        isInitialLoading: isOrganizationLoading,
         error: organizationError,
     } = useOrganization();
     const { activeProjectUuid, isLoading: isActiveProjectUuidLoading } =
         useActiveProjectUuid();
     const {
         data: project,
-        isLoading: isProjectLoading,
+        isInitialLoading: isProjectLoading,
         error: projectError,
     } = useProject(activeProjectUuid);
+
+    const allowPasswordAuthentication =
+        !health?.auth.disablePasswordAuthentication;
+
+    const hasSocialLogin =
+        health?.auth.google.enabled ||
+        health?.auth.okta.enabled ||
+        health?.auth.oneLogin.enabled ||
+        health?.auth.azuread.enabled ||
+        health?.auth.oidc.enabled;
+
+    const isGroupManagementEnabled = UserGroupFeatureFlag?.enabled;
+
+    const routes = useMemo<RouteObject[]>(() => {
+        const allowedRoutes: RouteObject[] = [
+            {
+                path: '/appearance',
+                element: <AppearanceSettingsPanel />,
+            },
+            {
+                path: '/profile',
+                element: (
+                    <SettingsGridCard>
+                        <Title order={4}>Profile settings</Title>
+                        <ProfilePanel />
+                    </SettingsGridCard>
+                ),
+            },
+            {
+                path: '*',
+                element: <Navigate to="/generalSettings/profile" />,
+            },
+        ];
+
+        if (allowPasswordAuthentication) {
+            allowedRoutes.push({
+                path: '/password',
+                element: (
+                    <Stack spacing="xl">
+                        <SettingsGridCard>
+                            <Title order={4}>Password settings</Title>
+                            <PasswordPanel />
+                        </SettingsGridCard>
+
+                        {hasSocialLogin && (
+                            <SettingsGridCard>
+                                <Title order={4}>Social logins</Title>
+                                <SocialLoginsPanel />
+                            </SettingsGridCard>
+                        )}
+                    </Stack>
+                ),
+            });
+        }
+        if (isPassthroughLoginFeatureEnabled) {
+            allowedRoutes.push({
+                path: '/myWarehouseConnections',
+                element: (
+                    <Stack spacing="xl">
+                        <MyWarehouseConnectionsPanel />
+                    </Stack>
+                ),
+            });
+        }
+        if (user?.ability.can('manage', 'PersonalAccessToken')) {
+            allowedRoutes.push({
+                path: '/organization',
+                element: (
+                    <Stack spacing="xl">
+                        <SettingsGridCard>
+                            <Title order={4}>General</Title>
+                            <OrganizationPanel />
+                        </SettingsGridCard>
+
+                        <SettingsGridCard>
+                            <div>
+                                <Title order={4}>Allowed email domains</Title>
+                                <Text c="gray.6" fz="xs">
+                                    Anyone with email addresses at these domains
+                                    can automatically join the organization.
+                                </Text>
+                            </div>
+                            <AllowedDomainsPanel />
+                        </SettingsGridCard>
+
+                        <SettingsGridCard>
+                            <div>
+                                <Title order={4}>Default Project</Title>
+                                <Text c="gray.6" fz="xs">
+                                    This is the project users will see when they
+                                    log in for the first time or from a new
+                                    device. If a user does not have access, they
+                                    will see their next accessible project.
+                                </Text>
+                            </div>
+                            <DefaultProjectPanel />
+                        </SettingsGridCard>
+
+                        {user.ability?.can('delete', 'Organization') && (
+                            <SettingsGridCard>
+                                <div>
+                                    <Title order={4}>Danger zone </Title>
+                                    <Text c="gray.6" fz="xs">
+                                        This action deletes the whole workspace
+                                        and all its content, including users.
+                                        This action is not reversible.
+                                    </Text>
+                                </div>
+                                <DeleteOrganizationPanel />
+                            </SettingsGridCard>
+                        )}
+                    </Stack>
+                ),
+            });
+        }
+        if (
+            user?.ability.can(
+                'manage',
+                subject('OrganizationMemberProfile', {
+                    organizationUuid: organization?.organizationUuid,
+                }),
+            )
+        ) {
+            allowedRoutes.push({
+                path: '/userManagement',
+                element: <UsersAndGroupsPanel />,
+            });
+        }
+
+        if (
+            user?.ability.can(
+                'manage',
+                subject('Organization', {
+                    organizationUuid: organization?.organizationUuid,
+                }),
+            )
+        ) {
+            allowedRoutes.push({
+                path: '/userAttributes',
+                element: <UserAttributesPanel />,
+            });
+        }
+        if (
+            organization &&
+            !organization.needsProject &&
+            user?.ability.can('view', 'Project')
+        ) {
+            allowedRoutes.push({
+                path: '/projectManagement',
+                element: <ProjectManagementPanel />,
+            });
+        }
+
+        if (
+            project &&
+            organization &&
+            !organization.needsProject &&
+            user?.ability.can(
+                'view',
+                subject('Project', {
+                    organizationUuid: organization.organizationUuid,
+                    projectUuid: project.projectUuid,
+                }),
+            )
+        ) {
+            allowedRoutes.push({
+                path: '/projectManagement/:projectUuid/*',
+                element: (
+                    <TrackPage name={PageName.PROJECT_SETTINGS}>
+                        <ProjectSettings />
+                    </TrackPage>
+                ),
+            });
+        }
+        if (user?.ability.can('manage', 'PersonalAccessToken')) {
+            allowedRoutes.push({
+                path: '/personalAccessTokens',
+                element: <AccessTokensPanel />,
+            });
+        }
+
+        if (user?.ability.can('manage', 'Organization')) {
+            allowedRoutes.push({
+                path: '/integrations',
+                element: (
+                    <Stack>
+                        <Title order={4}>Integrations</Title>
+                        {!health?.hasSlack &&
+                            !health?.hasGithub &&
+                            'No integrations available'}
+                        {health?.hasSlack && <SlackSettingsPanel />}
+                        {health?.hasGithub && <GithubSettingsPanel />}
+                    </Stack>
+                ),
+            });
+        }
+
+        return allowedRoutes;
+    }, [
+        isPassthroughLoginFeatureEnabled,
+        allowPasswordAuthentication,
+        hasSocialLogin,
+        user,
+        organization,
+        project,
+        health,
+    ]);
+    const routeElements = useRoutes(routes);
 
     if (
         isHealthLoading ||
@@ -102,15 +329,6 @@ const Settings: FC = () => {
 
     if (!health || !user || !organization) return null;
 
-    const allowPasswordAuthentication =
-        !health.auth.disablePasswordAuthentication;
-
-    const hasSocialLogin =
-        health.auth.google.enabled ||
-        health.auth.okta.enabled ||
-        health.auth.oneLogin.enabled ||
-        health.auth.azuread.enabled;
-
     return (
         <Page
             withFullHeight
@@ -123,47 +341,62 @@ const Settings: FC = () => {
                     <PageBreadcrumbs
                         items={[{ title: 'Settings', active: true }]}
                     />
+                    <ScrollArea
+                        variant="primary"
+                        offsetScrollbars
+                        scrollbarSize={8}
+                    >
+                        <Stack spacing="lg">
+                            <Box>
+                                <Title order={6} fw={600} mb="xs">
+                                    Your settings
+                                </Title>
 
-                    <Stack spacing="lg" sx={{ flexGrow: 1, overflow: 'auto' }}>
-                        <Box>
-                            <Title order={6} fw={600} mb="xs">
-                                Your settings
-                            </Title>
-
-                            <RouterNavLink
-                                exact
-                                to="/generalSettings"
-                                label="Profile"
-                                icon={<MantineIcon icon={IconUserCircle} />}
-                            />
-
-                            {allowPasswordAuthentication && (
                                 <RouterNavLink
-                                    label={
-                                        hasSocialLogin
-                                            ? 'Password & Social Logins'
-                                            : 'Password'
-                                    }
                                     exact
-                                    to="/generalSettings/password"
-                                    icon={<MantineIcon icon={IconLock} />}
+                                    to="/generalSettings"
+                                    label="Profile"
+                                    icon={<MantineIcon icon={IconUserCircle} />}
                                 />
-                            )}
 
-                            <RouterNavLink
-                                label="Personal access tokens"
-                                exact
-                                to="/generalSettings/personalAccessTokens"
-                                icon={<MantineIcon icon={IconKey} />}
-                            />
-                        </Box>
+                                {allowPasswordAuthentication && (
+                                    <RouterNavLink
+                                        label={
+                                            hasSocialLogin
+                                                ? 'Password & Social Logins'
+                                                : 'Password'
+                                        }
+                                        exact
+                                        to="/generalSettings/password"
+                                        icon={<MantineIcon icon={IconLock} />}
+                                    />
+                                )}
 
-                        <Can
-                            I="create"
-                            this={subject('Project', {
-                                organizationUuid: organization.organizationUuid,
-                            })}
-                        >
+                                {isPassthroughLoginFeatureEnabled && (
+                                    <RouterNavLink
+                                        label="My warehouse connections"
+                                        exact
+                                        to="/generalSettings/myWarehouseConnections"
+                                        icon={
+                                            <MantineIcon
+                                                icon={IconDatabaseCog}
+                                            />
+                                        }
+                                    />
+                                )}
+                                {user.ability.can(
+                                    'manage',
+                                    'PersonalAccessToken',
+                                ) && (
+                                    <RouterNavLink
+                                        label="Personal access tokens"
+                                        exact
+                                        to="/generalSettings/personalAccessTokens"
+                                        icon={<MantineIcon icon={IconKey} />}
+                                    />
+                                )}
+                            </Box>
+
                             <Box>
                                 <Title order={6} fw={600} mb="xs">
                                     Organization settings
@@ -188,7 +421,7 @@ const Settings: FC = () => {
                                 ) && (
                                     <RouterNavLink
                                         label={
-                                            groupManagementEnabled
+                                            isGroupManagementEnabled
                                                 ? 'Users & groups'
                                                 : 'User management'
                                         }
@@ -208,8 +441,8 @@ const Settings: FC = () => {
                                 ) && (
                                     <RouterNavLink
                                         label={
-                                            groupManagementEnabled
-                                                ? 'User & Group Attributes'
+                                            isGroupManagementEnabled
+                                                ? 'User & group attributes'
                                                 : 'User attributes'
                                         }
                                         to="/generalSettings/userAttributes"
@@ -233,20 +466,14 @@ const Settings: FC = () => {
                                     />
                                 )}
 
-                                {health.hasSlack &&
-                                    user.ability.can(
-                                        'manage',
-                                        'Organization',
-                                    ) && (
-                                        <RouterNavLink
-                                            label="Integrations"
-                                            exact
-                                            to="/generalSettings/integrations/slack"
-                                            icon={
-                                                <MantineIcon icon={IconPlug} />
-                                            }
-                                        />
-                                    )}
+                                {user.ability.can('manage', 'Organization') && (
+                                    <RouterNavLink
+                                        label="Integrations"
+                                        exact
+                                        to="/generalSettings/integrations"
+                                        icon={<MantineIcon icon={IconPlug} />}
+                                    />
+                                )}
 
                                 {organization &&
                                     !organization.needsProject &&
@@ -263,276 +490,166 @@ const Settings: FC = () => {
                                         />
                                     )}
                             </Box>
-                        </Can>
 
-                        {organization &&
-                        !organization.needsProject &&
-                        project &&
-                        user.ability.can(
-                            'update',
-                            subject('Project', {
-                                organizationUuid: organization.organizationUuid,
-                                projectUuid: project.projectUuid,
-                            }),
-                        ) ? (
-                            <Box>
-                                <Title order={6} fw={600} mb="xs">
-                                    Current project ({project?.name})
-                                </Title>
+                            {organization &&
+                            !organization.needsProject &&
+                            project &&
+                            user.ability.can(
+                                'update',
+                                subject('Project', {
+                                    organizationUuid:
+                                        organization.organizationUuid,
+                                    projectUuid: project.projectUuid,
+                                }),
+                            ) ? (
+                                <Box>
+                                    <Title order={6} fw={600} mb="xs">
+                                        Current project ({project?.name})
+                                    </Title>
 
-                                <RouterNavLink
-                                    label="Connection settings"
-                                    exact
-                                    to={`/generalSettings/projectManagement/${project.projectUuid}/settings`}
-                                    icon={
-                                        <MantineIcon icon={IconDatabaseCog} />
-                                    }
-                                />
-
-                                <RouterNavLink
-                                    label="Tables configuration"
-                                    exact
-                                    to={`/generalSettings/projectManagement/${project.projectUuid}/tablesConfiguration`}
-                                    icon={
-                                        <MantineIcon icon={IconTableOptions} />
-                                    }
-                                />
-
-                                <RouterNavLink
-                                    label="Project access"
-                                    exact
-                                    to={`/generalSettings/projectManagement/${project.projectUuid}/projectAccess`}
-                                    icon={<MantineIcon icon={IconUsers} />}
-                                />
-                                {user.ability?.can(
-                                    'manage',
-                                    subject('Project', {
-                                        organizationUuid:
-                                            project.organizationUuid,
-                                        projectUuid: project.projectUuid,
-                                    }),
-                                ) ? (
                                     <RouterNavLink
-                                        label="dbt Semantic Layer"
+                                        label="Connection settings"
                                         exact
-                                        to={`/generalSettings/projectManagement/${project.projectUuid}/integrations/dbtCloud`}
+                                        to={`/generalSettings/projectManagement/${project.projectUuid}/settings`}
                                         icon={
                                             <MantineIcon
-                                                icon={IconCloudSearch}
+                                                icon={IconDatabaseCog}
                                             />
                                         }
                                     />
-                                ) : null}
 
-                                {user.ability.can(
-                                    'view',
-                                    subject('Analytics', {
-                                        organizationUuid:
-                                            organization.organizationUuid,
-                                        projectUuid: project.projectUuid,
-                                    }),
-                                ) ? (
+                                    {user.ability?.can(
+                                        'manage',
+                                        subject('Project', {
+                                            organizationUuid:
+                                                project.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) && isSemanticLayerEnabled ? (
+                                        <RouterNavLink
+                                            label="Semantic Layer Integration"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/semanticLayer`}
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconLayersLinked}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
                                     <RouterNavLink
-                                        label="Usage analytics"
+                                        label="Tables configuration"
                                         exact
-                                        to={`/generalSettings/projectManagement/${project.projectUuid}/usageAnalytics`}
-                                        onClick={() => {
-                                            track({
-                                                name: EventName.USAGE_ANALYTICS_CLICKED,
-                                            });
-                                        }}
+                                        to={`/generalSettings/projectManagement/${project.projectUuid}/tablesConfiguration`}
                                         icon={
                                             <MantineIcon
-                                                icon={IconReportAnalytics}
+                                                icon={IconTableOptions}
                                             />
                                         }
                                     />
-                                ) : null}
 
-                                <RouterNavLink
-                                    label="Syncs & Scheduled deliveries"
-                                    exact
-                                    to={`/generalSettings/projectManagement/${project.projectUuid}/scheduledDeliveries`}
-                                    icon={
-                                        <MantineIcon icon={IconCalendarStats} />
-                                    }
-                                />
-
-                                {user.ability?.can(
-                                    'manage',
-                                    subject('Validation', {
-                                        organizationUuid:
-                                            project.organizationUuid,
-                                        projectUuid: project.projectUuid,
-                                    }),
-                                ) ? (
                                     <RouterNavLink
-                                        label="Validator"
+                                        label="Project access"
                                         exact
-                                        to={`/generalSettings/projectManagement/${project.projectUuid}/validator`}
+                                        to={`/generalSettings/projectManagement/${project.projectUuid}/projectAccess`}
+                                        icon={<MantineIcon icon={IconUsers} />}
+                                    />
+
+                                    {user.ability.can(
+                                        'view',
+                                        subject('Analytics', {
+                                            organizationUuid:
+                                                organization.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) ? (
+                                        <RouterNavLink
+                                            label="Usage analytics"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/usageAnalytics`}
+                                            onClick={() => {
+                                                track({
+                                                    name: EventName.USAGE_ANALYTICS_CLICKED,
+                                                });
+                                            }}
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconReportAnalytics}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
+                                    <RouterNavLink
+                                        label="Syncs & Scheduled deliveries"
+                                        exact
+                                        to={`/generalSettings/projectManagement/${project.projectUuid}/scheduledDeliveries`}
                                         icon={
-                                            <MantineIcon icon={IconChecklist} />
+                                            <MantineIcon
+                                                icon={IconCalendarStats}
+                                            />
                                         }
                                     />
-                                ) : null}
-                            </Box>
-                        ) : null}
-                    </Stack>
+
+                                    {user.ability?.can(
+                                        'manage',
+                                        subject('Validation', {
+                                            organizationUuid:
+                                                project.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) ? (
+                                        <RouterNavLink
+                                            label="Validator"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/validator`}
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconChecklist}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
+                                    {user.ability?.can(
+                                        'promote',
+                                        subject('SavedChart', {
+                                            organizationUuid:
+                                                project.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) ? (
+                                        <RouterNavLink
+                                            label="Data ops"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/dataOps`}
+                                            icon={
+                                                <MantineIcon
+                                                    icon={IconDatabaseExport}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
+                                    {isCustomSQLEnabled && (
+                                        <RouterNavLink
+                                            label="Custom SQL"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/customSql`}
+                                            icon={
+                                                <MantineIcon icon={IconSql} />
+                                            }
+                                        />
+                                    )}
+                                </Box>
+                            ) : null}
+                        </Stack>
+                    </ScrollArea>
                 </Stack>
             }
         >
-            <Switch>
-                {allowPasswordAuthentication && (
-                    <Route exact path="/generalSettings/password">
-                        <Stack spacing="xl">
-                            <SettingsGridCard>
-                                <Title order={4}>Password settings</Title>
-                                <PasswordPanel />
-                            </SettingsGridCard>
-
-                            {hasSocialLogin && (
-                                <SettingsGridCard>
-                                    <Title order={4}>Social logins</Title>
-                                    <SocialLoginsPanel />
-                                </SettingsGridCard>
-                            )}
-                        </Stack>
-                    </Route>
-                )}
-
-                {user.ability.can('manage', 'Organization') && (
-                    <Route exact path="/generalSettings/organization">
-                        <Stack spacing="xl">
-                            <SettingsGridCard>
-                                <Title order={4}>General</Title>
-                                <OrganizationPanel />
-                            </SettingsGridCard>
-
-                            <SettingsGridCard>
-                                <div>
-                                    <Title order={4}>
-                                        Allowed email domains
-                                    </Title>
-                                    <Text c="gray.6" fz="xs">
-                                        Anyone with email addresses at these
-                                        domains can automatically join the
-                                        organization.
-                                    </Text>
-                                </div>
-                                <AllowedDomainsPanel />
-                            </SettingsGridCard>
-
-                            <SettingsGridCard>
-                                <div>
-                                    <Title order={4}>Default Project</Title>
-                                    <Text c="gray.6" fz="xs">
-                                        This is the project users will see when
-                                        they log in for the first time or from a
-                                        new device. If a user does not have
-                                        access, they will see their next
-                                        accessible project.
-                                    </Text>
-                                </div>
-                                <DefaultProjectPanel />
-                            </SettingsGridCard>
-
-                            {user.ability?.can('delete', 'Organization') && (
-                                <SettingsGridCard>
-                                    <div>
-                                        <Title order={4}>Danger zone </Title>
-                                        <Text c="gray.6" fz="xs">
-                                            This action deletes the whole
-                                            workspace and all its content,
-                                            including users. This action is not
-                                            reversible.
-                                        </Text>
-                                    </div>
-                                    <DeleteOrganizationPanel />
-                                </SettingsGridCard>
-                            )}
-                        </Stack>
-                    </Route>
-                )}
-
-                {user.ability.can(
-                    'manage',
-                    subject('OrganizationMemberProfile', {
-                        organizationUuid: organization.organizationUuid,
-                    }),
-                ) && (
-                    <Route path="/generalSettings/userManagement">
-                        <UsersAndGroupsPanel />
-                    </Route>
-                )}
-
-                {user.ability.can(
-                    'manage',
-                    subject('Organization', {
-                        organizationUuid: organization.organizationUuid,
-                    }),
-                ) && (
-                    <Route path="/generalSettings/userAttributes">
-                        <UserAttributesPanel />
-                    </Route>
-                )}
-
-                {organization &&
-                    !organization.needsProject &&
-                    user.ability.can('view', 'Project') && (
-                        <Route exact path="/generalSettings/projectManagement">
-                            <ProjectManagementPanel />
-                        </Route>
-                    )}
-
-                {project &&
-                    organization &&
-                    !organization.needsProject &&
-                    user.ability.can(
-                        'view',
-                        subject('Project', {
-                            organizationUuid: organization.organizationUuid,
-                            projectUuid: project.projectUuid,
-                        }),
-                    ) && (
-                        <Route
-                            path={[
-                                '/generalSettings/projectManagement/:projectUuid/:tab?',
-                                '/generalSettings/projectManagement/:projectUuid/integrations/:tab',
-                            ]}
-                            exact
-                        >
-                            <TrackPage name={PageName.PROJECT_SETTINGS}>
-                                <ProjectSettings />
-                            </TrackPage>
-                        </Route>
-                    )}
-
-                <Route exact path="/generalSettings/appearance">
-                    <SettingsGridCard>
-                        <Title order={4}>Appearance settings</Title>
-                        <AppearancePanel />
-                    </SettingsGridCard>
-                </Route>
-
-                <Route exact path="/generalSettings/personalAccessTokens">
-                    <AccessTokensPanel />
-                </Route>
-
-                {health.hasSlack && user.ability.can('manage', 'Organization') && (
-                    <Route exact path="/generalSettings/integrations/slack">
-                        <SlackSettingsPanel />
-                    </Route>
-                )}
-
-                <Route exact path="/generalSettings">
-                    <SettingsGridCard>
-                        <Title order={4}>Profile settings</Title>
-                        <ProfilePanel />
-                    </SettingsGridCard>
-                </Route>
-
-                <Redirect to="/generalSettings" />
-            </Switch>
+            {routeElements}
         </Page>
     );
 };

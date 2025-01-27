@@ -1,13 +1,13 @@
 import {
-    CustomDimension,
-    Field,
     getItemId,
-    TableCalculation,
+    type CustomDimension,
+    type Field,
+    type TableCalculation,
 } from '@lightdash/common';
 import { ActionIcon, Flex, Menu, Text } from '@mantine/core';
 import { IconCheck, IconChevronDown } from '@tabler/icons-react';
-import { FC, useMemo } from 'react';
-import { useDashboardContext } from '../../providers/DashboardProvider';
+import { useMemo, type FC } from 'react';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import {
     getSortDirectionOrder,
     getSortIcon,
@@ -15,7 +15,7 @@ import {
     SortDirection,
 } from '../../utils/sortUtils';
 import MantineIcon from '../common/MantineIcon';
-import { HeaderProps, TableColumn } from '../common/Table/types';
+import { type HeaderProps, type TableColumn } from '../common/Table/types';
 
 type Props = {
     item: Field | TableCalculation | CustomDimension;

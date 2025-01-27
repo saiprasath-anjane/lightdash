@@ -1,26 +1,25 @@
 import {
-    CustomDimension,
-    Field,
-    getDefaultSeriesColor,
-    getItemId,
-    getSeriesId,
-    Series,
-    TableCalculation,
-} from '@lightdash/common';
-import { Divider } from '@mantine/core';
-import produce from 'immer';
-import React, { FC, useCallback, useMemo } from 'react';
-import {
     DragDropContext,
     Draggable,
-    DraggableStateSnapshot,
     Droppable,
-    DropResult,
-} from 'react-beautiful-dnd';
+    type DraggableStateSnapshot,
+    type DropResult,
+} from '@hello-pangea/dnd';
+import {
+    getItemId,
+    getSeriesId,
+    type CustomDimension,
+    type Field,
+    type Series as SeriesType,
+    type TableCalculation,
+} from '@lightdash/common';
+import { Divider } from '@mantine/core';
+import { produce } from 'immer';
+import React, { Fragment, useCallback, useMemo, type FC } from 'react';
 import { createPortal } from 'react-dom';
 import { getSeriesGroupedByField } from '../../../../hooks/cartesianChartConfig/utils';
-import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/VisualizationConfigCartesian';
-import { useVisualizationContext } from '../../../LightdashVisualization/VisualizationProvider';
+import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import BasicSeriesConfiguration from './BasicSeriesConfiguration';
 import GroupedSeriesConfiguration from './GroupedSeriesConfiguration';
 import InvalidSeriesConfiguration from './InvalidSeriesConfiguration';
@@ -29,10 +28,9 @@ type DraggablePortalHandlerProps = {
     snapshot: DraggableStateSnapshot;
 };
 
-const DraggablePortalHandler: FC<DraggablePortalHandlerProps> = ({
-    children,
-    snapshot,
-}) => {
+const DraggablePortalHandler: FC<
+    React.PropsWithChildren<DraggablePortalHandlerProps>
+> = ({ children, snapshot }) => {
     if (snapshot.isDragging) return createPortal(children, document.body);
     return <>{children}</>;
 };
@@ -41,8 +39,8 @@ type Props = {
     items: (Field | TableCalculation | CustomDimension)[];
 };
 
-const SeriesTab: FC<Props> = ({ items }) => {
-    const { visualizationConfig, colorPalette } = useVisualizationContext();
+export const Series: FC<Props> = ({ items }) => {
+    const { visualizationConfig, getSeriesColor } = useVisualizationContext();
 
     const isCartesianChart =
         isCartesianVisualizationConfig(visualizationConfig);
@@ -51,30 +49,6 @@ const SeriesTab: FC<Props> = ({ items }) => {
         if (!isCartesianChart) return;
         return visualizationConfig.chartConfig;
     }, [isCartesianChart, visualizationConfig]);
-
-    const fallbackSeriesColours = useMemo(() => {
-        if (!chartConfig) return;
-
-        const dirtyEchartsConfig = chartConfig.dirtyEchartsConfig;
-
-        return (dirtyEchartsConfig?.series || [])
-            .filter(({ color }) => !color)
-            .reduce<Record<string, string>>(
-                (sum, series, index) => ({
-                    ...sum,
-                    [getSeriesId(series)]:
-                        colorPalette[index] || getDefaultSeriesColor(index),
-                }),
-                {},
-            );
-    }, [chartConfig, colorPalette]);
-
-    const getSeriesColor = useCallback(
-        (seriesId: string) => {
-            return fallbackSeriesColours?.[seriesId];
-        },
-        [fallbackSeriesColours],
-    );
 
     const seriesGroupedByField = useMemo(() => {
         if (!isCartesianChart) return;
@@ -101,12 +75,12 @@ const SeriesTab: FC<Props> = ({ items }) => {
                     newState.splice(destinationIndex, 0, removed);
                 },
             );
-            const reorderedSeries = reorderedSeriesGroups.reduce<Series[]>(
+            const reorderedSeries = reorderedSeriesGroups.reduce<SeriesType[]>(
                 (acc, seriesGroup) => [
                     ...acc,
                     ...seriesGroup.value.map((s) => ({
                         ...s,
-                        color: s.color || getSeriesColor(getSeriesId(s)),
+                        color: getSeriesColor(s),
                     })),
                 ],
                 [],
@@ -122,6 +96,7 @@ const SeriesTab: FC<Props> = ({ items }) => {
         dirtyEchartsConfig,
         dirtyLayout,
         updateSeries,
+        getSingleSeries,
         updateSingleSeries,
         updateAllGroupedSeries,
     } = visualizationConfig.chartConfig;
@@ -145,7 +120,7 @@ const SeriesTab: FC<Props> = ({ items }) => {
 
                             if (!field) {
                                 return (
-                                    <>
+                                    <Fragment key={i}>
                                         <InvalidSeriesConfiguration
                                             itemId={
                                                 seriesEntry.encode.yRef.field
@@ -154,7 +129,7 @@ const SeriesTab: FC<Props> = ({ items }) => {
                                         {hasDivider && (
                                             <Divider mt="md" mb="lg" />
                                         )}
-                                    </>
+                                    </Fragment>
                                 );
                             }
 
@@ -187,9 +162,6 @@ const SeriesTab: FC<Props> = ({ items }) => {
                                                         seriesGroup={
                                                             seriesGroup.value
                                                         }
-                                                        getSeriesColor={
-                                                            getSeriesColor
-                                                        }
                                                         updateSingleSeries={
                                                             updateSingleSeries
                                                         }
@@ -201,6 +173,9 @@ const SeriesTab: FC<Props> = ({ items }) => {
                                                         }
                                                         updateSeries={
                                                             updateSeries
+                                                        }
+                                                        getSingleSeries={
+                                                            getSingleSeries
                                                         }
                                                         series={
                                                             dirtyEchartsConfig?.series ||
@@ -216,8 +191,8 @@ const SeriesTab: FC<Props> = ({ items }) => {
                                                             1
                                                         }
                                                         series={seriesEntry}
-                                                        getSeriesColor={
-                                                            getSeriesColor
+                                                        getSingleSeries={
+                                                            getSingleSeries
                                                         }
                                                         updateSingleSeries={
                                                             updateSingleSeries
@@ -228,7 +203,7 @@ const SeriesTab: FC<Props> = ({ items }) => {
                                                     />
                                                 )}
                                                 {hasDivider && (
-                                                    <Divider mt="md" mb="lg" />
+                                                    <Divider my="md" />
                                                 )}
                                             </div>
                                         </DraggablePortalHandler>
@@ -243,5 +218,3 @@ const SeriesTab: FC<Props> = ({ items }) => {
         </DragDropContext>
     );
 };
-
-export default SeriesTab;

@@ -1,7 +1,7 @@
 import { getPasswordSchema } from '@lightdash/common';
-import { Button, PasswordInput, Stack } from '@mantine/core';
+import { Button, Flex, PasswordInput, Stack } from '@mantine/core';
 import { useForm, zodResolver } from '@mantine/form';
-import { FC } from 'react';
+import { type FC } from 'react';
 import { z } from 'zod';
 import useToaster from '../../../hooks/toaster/useToaster';
 import {
@@ -26,7 +26,7 @@ const validationSchema = (hasCurrentPassword: boolean) => {
 
 const PasswordPanel: FC = () => {
     const { data: hasPassword } = useUserHasPassword();
-    const { showToastSuccess, showToastError } = useToaster();
+    const { showToastSuccess, showToastApiError } = useToaster();
 
     const form = useForm({
         initialValues: {
@@ -36,7 +36,7 @@ const PasswordPanel: FC = () => {
         validate: zodResolver(validationSchema(!!hasPassword)),
     });
 
-    const { isLoading, mutate: updateUserPassword } =
+    const { isLoading: isUpdatingUserPassword, mutate: updateUserPassword } =
         useUserUpdatePasswordMutation({
             onSuccess: () => {
                 showToastSuccess({
@@ -46,23 +46,20 @@ const PasswordPanel: FC = () => {
                 window.location.href = '/login';
             },
             onError: ({ error }) => {
-                showToastError({
+                showToastApiError({
                     title: 'Failed to update password',
-                    subtitle: error.message,
+                    apiError: error,
                 });
             },
         });
 
     const handleOnSubmit = form.onSubmit(({ currentPassword, newPassword }) => {
+        if (!form.isValid()) return;
+
         if (hasPassword) {
-            updateUserPassword({
-                password: currentPassword,
-                newPassword,
-            });
+            updateUserPassword({ password: currentPassword, newPassword });
         } else {
-            updateUserPassword({
-                newPassword,
-            });
+            updateUserPassword({ newPassword });
         }
     });
 
@@ -73,7 +70,7 @@ const PasswordPanel: FC = () => {
                     <PasswordInput
                         label="Current password"
                         placeholder="Enter your password..."
-                        disabled={isLoading}
+                        disabled={isUpdatingUserPassword}
                         {...form.getInputProps('currentPassword')}
                     />
                 )}
@@ -81,19 +78,27 @@ const PasswordPanel: FC = () => {
                     <PasswordInput
                         label="New password"
                         placeholder="Enter your new password..."
-                        disabled={isLoading}
+                        disabled={isUpdatingUserPassword}
                         {...form.getInputProps('newPassword')}
                     />
                 </PasswordTextInput>
-                <Button
-                    type="submit"
-                    ml="auto"
-                    display="block"
-                    loading={isLoading}
-                    disabled={isLoading}
-                >
-                    Update
-                </Button>
+
+                <Flex justify="flex-end" gap="sm">
+                    {form.isDirty() && !isUpdatingUserPassword && (
+                        <Button variant="outline" onClick={() => form.reset()}>
+                            Cancel
+                        </Button>
+                    )}
+
+                    <Button
+                        type="submit"
+                        display="block"
+                        loading={isUpdatingUserPassword}
+                        disabled={isUpdatingUserPassword}
+                    >
+                        Update
+                    </Button>
+                </Flex>
             </Stack>
         </form>
     );

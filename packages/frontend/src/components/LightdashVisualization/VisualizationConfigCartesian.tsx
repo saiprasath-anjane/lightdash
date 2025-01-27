@@ -1,35 +1,7 @@
-import { ChartType, ItemsMap } from '@lightdash/common';
-import { FC, useEffect } from 'react';
-import useCartesianChartConfig, {
-    CartesianTypeOptions,
-} from '../../hooks/cartesianChartConfig/useCartesianChartConfig';
-import {
-    VisualizationConfig,
-    VisualizationConfigCommon,
-} from './VisualizationProvider';
-
-export type VisualizationConfigCartesian = {
-    chartType: ChartType.CARTESIAN;
-    chartConfig: ReturnType<typeof useCartesianChartConfig>;
-};
-
-export const isCartesianVisualizationConfig = (
-    visualizationConfig: VisualizationConfig | undefined,
-): visualizationConfig is VisualizationConfigCartesian => {
-    return visualizationConfig?.chartType === ChartType.CARTESIAN;
-};
-
-type VisualizationCartesianConfigProps =
-    VisualizationConfigCommon<VisualizationConfigCartesian> & {
-        itemsMap: ItemsMap | undefined;
-        stacking: boolean | undefined;
-        cartesianType: CartesianTypeOptions | undefined;
-        columnOrder: string[];
-        validPivotDimensions: string[] | undefined;
-        setPivotDimensions: React.Dispatch<
-            React.SetStateAction<string[] | undefined>
-        >;
-    };
+import { ChartType } from '@lightdash/common';
+import { useEffect, type FC } from 'react';
+import useCartesianChartConfig from '../../hooks/cartesianChartConfig/useCartesianChartConfig';
+import { type VisualizationCartesianConfigProps } from './types';
 
 const VisualizationCartesianConfig: FC<VisualizationCartesianConfigProps> = ({
     itemsMap,
@@ -41,7 +13,9 @@ const VisualizationCartesianConfig: FC<VisualizationCartesianConfigProps> = ({
     onChartConfigChange,
     stacking,
     cartesianType,
+    colorPalette,
     children,
+    tableCalculationsMetadata,
 }) => {
     const cartesianConfig = useCartesianChartConfig({
         initialChartConfig,
@@ -52,6 +26,8 @@ const VisualizationCartesianConfig: FC<VisualizationCartesianConfigProps> = ({
         itemsMap,
         stacking,
         cartesianType,
+        colorPalette,
+        tableCalculationsMetadata,
     });
 
     useEffect(() => {

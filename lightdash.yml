@@ -1,9 +1,0 @@
-version: '1.0'
-authentication:
-  type: external
-  external_auth_url: "http://localhost:5000/auth"
-  external_auth_api_key: "${EXTERNAL_AUTH_API_KEY}"
-  # Optional customization (redirect to Flask app login page)
-  login_endpoint: "http://localhost:5000/login"
-  # login_template: "path/to/your/custom/login_template.html" (optional)
-

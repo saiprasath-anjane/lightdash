@@ -2,7 +2,7 @@ import { getPasswordSchema } from '@lightdash/common';
 import { Group, Popover, Progress, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconCheck, IconX } from '@tabler/icons-react';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import MantineIcon from '../common/MantineIcon';
 
 const PasswordRequirement = ({
@@ -35,7 +35,10 @@ const checks = passwordSchema._def.checks
     .map((check) => check.message)
     .filter((check): check is string => !!check);
 
-const PasswordTextInput: FC<Props> = ({ passwordValue, children }) => {
+const PasswordTextInput: FC<React.PropsWithChildren<Props>> = ({
+    passwordValue,
+    children,
+}) => {
     const [isPopoverOpen, { open: openPopover, close: closePopover }] =
         useDisclosure();
 

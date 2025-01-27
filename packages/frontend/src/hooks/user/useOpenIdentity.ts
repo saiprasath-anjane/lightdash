@@ -1,14 +1,14 @@
 import {
-    ApiError,
-    DeleteOpenIdentity,
-    OpenIdIdentitySummary,
+    type ApiError,
+    type DeleteOpenIdentity,
+    type OpenIdIdentitySummary,
 } from '@lightdash/common';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { lightdashApi } from '../../api';
 import useToaster from '../toaster/useToaster';
 
 const deleteOpenIdentity = async (data: DeleteOpenIdentity) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/user/identity`,
         method: 'DELETE',
         body: JSON.stringify(data),
@@ -16,24 +16,21 @@ const deleteOpenIdentity = async (data: DeleteOpenIdentity) =>
 
 export const useDeleteOpenIdentityMutation = () => {
     const queryClient = useQueryClient();
-    const { showToastSuccess, showToastError } = useToaster();
-    return useMutation<undefined, ApiError, DeleteOpenIdentity>(
-        deleteOpenIdentity,
-        {
-            onSuccess: async () => {
-                await queryClient.invalidateQueries('user_identities');
-                showToastSuccess({
-                    title: `Deleted! Social login was deleted.`,
-                });
-            },
-            onError: (error) => {
-                showToastError({
-                    title: `Failed to delete social login`,
-                    subtitle: error.error.message,
-                });
-            },
+    const { showToastSuccess, showToastApiError } = useToaster();
+    return useMutation<null, ApiError, DeleteOpenIdentity>(deleteOpenIdentity, {
+        onSuccess: async () => {
+            await queryClient.invalidateQueries(['user_identities']);
+            showToastSuccess({
+                title: `Deleted! Social login was deleted.`,
+            });
         },
-    );
+        onError: ({ error }) => {
+            showToastApiError({
+                title: `Failed to delete social login`,
+                apiError: error,
+            });
+        },
+    });
 };
 
 const getIdentitiesQuery = async () =>
@@ -50,6 +47,6 @@ export const useOpenIdentities = () =>
         Record<OpenIdIdentitySummary['issuerType'], OpenIdIdentitySummary[]>,
         ApiError
     >({
-        queryKey: 'user_identities',
+        queryKey: ['user_identities'],
         queryFn: getIdentitiesQuery,
     });

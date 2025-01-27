@@ -1,5 +1,5 @@
 import { Select } from '@mantine/core';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { Frequency } from './cronInputUtils';
 
 type FrequencyItem = {
@@ -26,7 +26,7 @@ const FrequencyItems: Array<FrequencyItem> = [
     },
     {
         value: Frequency.CUSTOM,
-        label: 'Custom cron expression',
+        label: 'Custom',
     },
 ];
 
@@ -42,7 +42,7 @@ const FrequencySelect: FC<{
             withinPortal
             disabled={disabled}
             onChange={onChange}
-            w={210}
+            w={110}
             sx={{ alignSelf: 'start' }}
         />
     );

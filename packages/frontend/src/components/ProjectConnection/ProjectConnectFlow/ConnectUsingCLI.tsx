@@ -1,19 +1,19 @@
 import {
     getDateFormat,
-    OrganizationProject,
     TimeFrames,
+    type OrganizationProject,
 } from '@lightdash/common';
 import { Avatar, Button, LoadingOverlay, Stack, Text } from '@mantine/core';
 import { Prism } from '@mantine/prism';
 import { IconChevronLeft, IconClock } from '@tabler/icons-react';
-import moment from 'moment';
-import { FC, useCallback, useEffect, useRef } from 'react';
-import { useQueryClient } from 'react-query';
-import { useHistory } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import dayjs from 'dayjs';
+import { useCallback, useEffect, useRef, type FC } from 'react';
+import { useNavigate } from 'react-router';
 import useToaster from '../../../hooks/toaster/useToaster';
 import { useCreateAccessToken } from '../../../hooks/useAccessToken';
 import { useProjects } from '../../../hooks/useProjects';
-import { useTracking } from '../../../providers/TrackingProvider';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import MantineIcon from '../../common/MantineIcon';
 import { ProjectCreationCard } from '../../common/Settings/SettingsCard';
@@ -31,9 +31,9 @@ const ConnectUsingCLI: FC<ConnectUsingCliProps> = ({
     version,
     onBack,
 }) => {
-    const history = useHistory();
+    const navigate = useNavigate();
     const initialProjectFetch = useRef(false);
-    const existingProjects = useRef<OrganizationProject[]>();
+    const existingProjects = useRef<OrganizationProject[] | null>(null);
     const { showToastSuccess } = useToaster();
     const queryClient = useQueryClient();
     const { track } = useTracking();
@@ -61,10 +61,13 @@ const ConnectUsingCLI: FC<ConnectUsingCliProps> = ({
                     (uuid) => !existingUuids.includes(uuid),
                 );
 
-                await queryClient.invalidateQueries('organization');
+                await queryClient.invalidateQueries(['organization']);
 
-                history.replace(
+                void navigate(
                     `/createProject/cli?projectUuid=${newProjectUuid}`,
+                    {
+                        replace: true,
+                    },
                 );
             }
         },
@@ -80,8 +83,8 @@ const ConnectUsingCLI: FC<ConnectUsingCliProps> = ({
     useEffect(() => {
         if (isTokenCreated) return;
 
-        const expiresAt = moment().add(30, 'days').toDate();
-        const generatedAtString = moment().format(
+        const expiresAt = dayjs().add(30, 'days').toDate();
+        const generatedAtString = dayjs().format(
             getDateFormat(TimeFrames.SECOND),
         );
 

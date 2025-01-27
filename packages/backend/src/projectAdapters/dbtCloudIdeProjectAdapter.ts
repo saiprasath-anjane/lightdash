@@ -1,39 +1,35 @@
-import { Explore, ExploreError, SupportedDbtVersions } from '@lightdash/common';
+import { SupportedDbtVersions } from '@lightdash/common';
 import { WarehouseClient } from '@lightdash/warehouses';
-import { DbtCloudV2RpcClient } from '../dbt/dbtCloudV2RpcClient';
-import { CachedWarehouse } from '../types';
+import { DbtMetadataApiClient } from '../dbt/DbtMetadataApiClient';
+import { CachedWarehouse, ProjectAdapter } from '../types';
 import { DbtBaseProjectAdapter } from './dbtBaseProjectAdapter';
 
 type DbtCloudideProjectAdapterArgs = {
     warehouseClient: WarehouseClient;
-    accountId: string | number;
+    discoveryApiEndpoint: string | undefined;
     environmentId: string | number;
-    projectId: string | number;
     apiKey: string;
     cachedWarehouse: CachedWarehouse;
     dbtVersion: SupportedDbtVersions;
 };
 
-export class DbtCloudIdeProjectAdapter extends DbtBaseProjectAdapter {
+export class DbtCloudIdeProjectAdapter
+    extends DbtBaseProjectAdapter
+    implements ProjectAdapter
+{
     constructor({
         warehouseClient,
-        accountId,
         environmentId,
-        projectId,
         apiKey,
         cachedWarehouse,
         dbtVersion,
+        discoveryApiEndpoint,
     }: DbtCloudideProjectAdapterArgs) {
-        const rpcClient = new DbtCloudV2RpcClient(
-            accountId,
+        const dbtClient = new DbtMetadataApiClient({
             environmentId,
-            projectId,
-            apiKey,
-        );
-        super(rpcClient, warehouseClient, cachedWarehouse, dbtVersion);
-    }
-
-    public async compileAllExplores(): Promise<(Explore | ExploreError)[]> {
-        return super.compileAllExplores(false);
+            bearerToken: apiKey,
+            discoveryApiEndpoint,
+        });
+        super(dbtClient, warehouseClient, cachedWarehouse, dbtVersion);
     }
 }

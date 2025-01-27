@@ -1,29 +1,34 @@
 import { ActionIcon, Group, Stack, Tabs, Title, Tooltip } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
-import { FC } from 'react';
-import { useApp } from '../../../providers/AppProvider';
+import { type FC } from 'react';
+import useApp from '../../../providers/App/useApp';
 
 import MantineIcon from '../../common/MantineIcon';
 import ForbiddenPanel from '../../ForbiddenPanel';
 
+import { FeatureFlags } from '@lightdash/common';
+import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import GroupsView from './GroupsView';
 import UsersView from './UsersView';
 
 const UsersAndGroupsPanel: FC = () => {
-    // TODO: this is a feature flag while we are building groups.
-    // Remove this when groups are ready to be released.
-    const groupManagementEnabled = useFeatureFlagEnabled('group-management');
     const { user } = useApp();
+    const { data: UserGroupsFeatureFlag } = useFeatureFlag(
+        FeatureFlags.UserGroupsEnabled,
+    );
 
-    if (user.data?.ability.cannot('view', 'OrganizationMemberProfile')) {
+    if (!user.data || !UserGroupsFeatureFlag) return null;
+
+    if (user.data.ability.cannot('view', 'OrganizationMemberProfile')) {
         return <ForbiddenPanel />;
     }
+
+    const isGroupManagementEnabled = UserGroupsFeatureFlag?.enabled;
 
     return (
         <Stack spacing="sm">
             <Group spacing="two">
-                {groupManagementEnabled ? (
+                {isGroupManagementEnabled ? (
                     <Title order={5}>Users and groups</Title>
                 ) : (
                     <Title order={5}>User management settings</Title>
@@ -41,8 +46,8 @@ const UsersAndGroupsPanel: FC = () => {
             </Group>
 
             <Tabs defaultValue={'users'}>
-                {groupManagementEnabled && (
-                    <Tabs.List mb="xs">
+                {isGroupManagementEnabled && (
+                    <Tabs.List mx="one">
                         <Tabs.Tab value="users">Users</Tabs.Tab>
                         <Tabs.Tab value="groups">Groups</Tabs.Tab>
                     </Tabs.List>

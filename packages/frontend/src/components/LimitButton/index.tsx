@@ -1,19 +1,20 @@
-import { Button, MantineSize, Popover } from '@mantine/core';
+import { Button, Popover, type MantineSize } from '@mantine/core';
 import { useClickOutside, useDisclosure } from '@mantine/hooks';
 import { IconChevronDown } from '@tabler/icons-react';
-import { FC, memo } from 'react';
+import { memo, type FC } from 'react';
 import MantineIcon from '../common/MantineIcon';
 import LimitForm from './LimitForm';
 
 export type Props = {
     size?: MantineSize;
     disabled?: boolean;
+    maxLimit: number;
     limit: number;
     onLimitChange: (value: number) => void;
 };
 
 const LimitButton: FC<Props> = memo(
-    ({ size, disabled, limit, onLimitChange }) => {
+    ({ size, disabled, maxLimit, limit, onLimitChange }) => {
         const [opened, { open, close }] = useDisclosure(false);
         const ref = useClickOutside(
             () => setTimeout(() => close(), 0),
@@ -50,6 +51,7 @@ const LimitButton: FC<Props> = memo(
                 <Popover.Dropdown>
                     <LimitForm
                         ref={ref}
+                        maxLimit={maxLimit}
                         limit={limit}
                         onLimitChange={handleLimitChange}
                     />

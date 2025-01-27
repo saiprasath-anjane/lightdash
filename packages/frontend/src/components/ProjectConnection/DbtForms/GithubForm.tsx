@@ -1,6 +1,6 @@
 import { DbtProjectType } from '@lightdash/common';
 import { Anchor, PasswordInput, Stack, TextInput } from '@mantine/core';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
     hasNoWhiteSpaces,
@@ -8,7 +8,7 @@ import {
     isValidGithubToken,
     startWithSlash,
 } from '../../../utils/fieldValidators';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 
 const GithubForm: FC<{ disabled: boolean }> = ({ disabled }) => {
     const { savedProject } = useProjectFormContext();

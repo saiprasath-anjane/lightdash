@@ -1,16 +1,17 @@
 import { useDisclosure } from '@mantine/hooks';
 import { IconChartPieOff } from '@tabler/icons-react';
-import { ECElementEvent } from 'echarts';
+import { type ECElementEvent } from 'echarts';
 import EChartsReact from 'echarts-for-react';
-import { EChartsReactProps, Opts } from 'echarts-for-react/lib/types';
-import { FC, memo, useCallback, useEffect, useState } from 'react';
+import { type EChartsReactProps, type Opts } from 'echarts-for-react/lib/types';
+import { memo, useCallback, useEffect, useState, type FC } from 'react';
 import useEchartsPieConfig, {
-    PieSeriesDataPoint,
+    type PieSeriesDataPoint,
 } from '../../hooks/echarts/useEchartsPieConfig';
+import useApp from '../../providers/App/useApp';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
-import { useVisualizationContext } from '../LightdashVisualization/VisualizationProvider';
+import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import PieChartContextMenu, {
-    PieChartContextMenuProps,
+    type PieChartContextMenuProps,
 } from './PieChartContextMenu';
 
 const EmptyChart = () => (
@@ -46,6 +47,7 @@ const SimplePieChart: FC<SimplePieChartProps> = memo((props) => {
     const { chartRef, isLoading } = useVisualizationContext();
 
     const pieChartOptions = useEchartsPieConfig(props.isInDashboard);
+    const { user } = useApp();
 
     const [isOpen, { open, close }] = useDisclosure();
     const [menuProps, setMenuProps] = useState<{
@@ -116,13 +118,15 @@ const SimplePieChart: FC<SimplePieChartProps> = memo((props) => {
                 }}
             />
 
-            <PieChartContextMenu
-                value={menuProps?.value}
-                menuPosition={menuProps?.position}
-                rows={menuProps?.rows}
-                opened={isOpen}
-                onClose={handleCloseContextMenu}
-            />
+            {user.data && (
+                <PieChartContextMenu
+                    value={menuProps?.value}
+                    menuPosition={menuProps?.position}
+                    rows={menuProps?.rows}
+                    opened={isOpen}
+                    onClose={handleCloseContextMenu}
+                />
+            )}
         </>
     );
 });

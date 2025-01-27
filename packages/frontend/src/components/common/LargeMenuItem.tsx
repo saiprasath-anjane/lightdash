@@ -2,22 +2,24 @@ import {
     Card,
     createPolymorphicComponent,
     Menu,
-    MenuItemProps,
     Stack,
     Text,
+    type MenuItemProps,
 } from '@mantine/core';
-import { Icon as TablerIconType } from '@tabler/icons-react';
-import { forwardRef, ReactNode } from 'react';
-import MantineIcon, { MantineIconProps } from './MantineIcon';
+import { type Icon as TablerIconType } from '@tabler/icons-react';
+import { forwardRef, type ReactNode } from 'react';
+import MantineIcon, { type MantineIconProps } from './MantineIcon';
 
-interface LargeMenuItemProps extends MenuItemProps {
+interface LargeMenuItemProps extends Omit<MenuItemProps, 'icon'> {
     icon: TablerIconType;
     iconProps?: Omit<MantineIconProps, 'icon'>;
     title: string;
     description: string | ReactNode;
 }
 
-const LargeMenuItem = createPolymorphicComponent<'button', LargeMenuItemProps>(
+const LargeMenuItem: ReturnType<
+    typeof createPolymorphicComponent<'button', LargeMenuItemProps>
+> = createPolymorphicComponent<'button', LargeMenuItemProps>(
     forwardRef<HTMLButtonElement, LargeMenuItemProps>(
         ({ icon, title, description, iconProps, ...rest }, ref) => {
             return (

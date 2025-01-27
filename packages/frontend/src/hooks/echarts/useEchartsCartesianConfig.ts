@@ -1,46 +1,55 @@
 import {
-    ApiQueryResults,
-    CartesianChart,
+    applyCustomFormat,
+    assertUnreachable,
     CartesianSeriesType,
     DimensionType,
     formatItemValue,
-    formatTableCalculationValue,
-    formatValue,
     friendlyName,
     getAxisName,
+    getCustomFormatFromLegacy,
     getDateGroupLabel,
-    getDefaultSeriesColor,
     getItemLabelWithoutTableName,
+    getItemType,
     getResultValueArray,
+    hasFormatting,
     hashFieldReference,
     isCompleteLayout,
+    isCustomBinDimension,
     isCustomDimension,
+    isCustomSqlDimension,
     isDimension,
     isField,
+    isMetric,
     isPivotReferenceWithValues,
     isTableCalculation,
     isTimeInterval,
-    ItemsMap,
     MetricType,
-    PivotReference,
-    ResultRow,
-    Series,
-    TableCalculation,
+    TableCalculationType,
     timeFrameConfigs,
+    TimeFrames,
+    type ApiQueryResults,
+    type CartesianChart,
+    type CustomDimension,
+    type Field,
+    type ItemsMap,
+    type PivotReference,
+    type ResultRow,
+    type Series,
+    type TableCalculation,
 } from '@lightdash/common';
+import dayjs from 'dayjs';
 import {
-    DefaultLabelFormatterCallbackParams,
-    LineSeriesOption,
-    TooltipComponentFormatterCallback,
-    TooltipComponentOption,
+    type DefaultLabelFormatterCallbackParams,
+    type LineSeriesOption,
+    type TooltipComponentFormatterCallback,
+    type TooltipComponentOption,
 } from 'echarts';
 import groupBy from 'lodash/groupBy';
 import toNumber from 'lodash/toNumber';
-import moment from 'moment';
 import { useMemo } from 'react';
-import { isCartesianVisualizationConfig } from '../../components/LightdashVisualization/VisualizationConfigCartesian';
-import { useVisualizationContext } from '../../components/LightdashVisualization/VisualizationProvider';
-import { defaultGrid } from '../../components/VisualizationConfigs/ChartConfigPanel/Grid';
+import { isCartesianVisualizationConfig } from '../../components/LightdashVisualization/types';
+import { useVisualizationContext } from '../../components/LightdashVisualization/useVisualizationContext';
+import { defaultGrid } from '../../components/VisualizationConfigs/ChartConfigPanel/Grid/constants';
 import { EMPTY_X_AXIS } from '../cartesianChartConfig/useCartesianChartConfig';
 import getPlottedData from '../plottedData/getPlottedData';
 
@@ -76,10 +85,21 @@ const getLabelFromField = (fields: ItemsMap, key: string | undefined) => {
     }
 };
 
-const getAxisTypeFromField = (item?: ItemsMap[string]): string => {
-    if (item && isCustomDimension(item)) return 'category';
-    if (item && isField(item)) {
-        switch (item.type) {
+const getAxisTypeFromField = (
+    item?: ItemsMap[string],
+    hasReferenceLine?: boolean,
+): string => {
+    if (item && isCustomBinDimension(item)) return 'category';
+    if (item && isTableCalculation(item) && !item.type) return 'value';
+    if (
+        item &&
+        (isField(item) ||
+            isTableCalculation(item) ||
+            isCustomSqlDimension(item))
+    ) {
+        const type = getItemType(item);
+        switch (type) {
+            case TableCalculationType.NUMBER:
             case DimensionType.NUMBER:
             case MetricType.NUMBER:
             case MetricType.PERCENTILE:
@@ -96,6 +116,18 @@ const getAxisTypeFromField = (item?: ItemsMap[string]): string => {
             case MetricType.TIMESTAMP:
             case DimensionType.DATE:
             case MetricType.DATE:
+            case TableCalculationType.DATE:
+            case TableCalculationType.TIMESTAMP:
+                // Use categorical axis for weeks only. Echarts handles the
+                // other time frames well with a time axis
+                // Reference lines can only be used on time/value axes
+                if (
+                    'timeInterval' in item &&
+                    item.timeInterval === TimeFrames.WEEK &&
+                    !hasReferenceLine
+                ) {
+                    return 'category';
+                }
                 return 'time';
             default: {
                 return 'category';
@@ -122,18 +154,30 @@ const getAxisType = ({
     rightAxisYId,
     leftAxisYId,
 }: GetAxisTypeArg) => {
+    const hasReferenceLine = (axisId: string | undefined) => {
+        if (axisId === undefined) return false;
+        return validCartesianConfig.eChartsConfig.series?.some(
+            (serie) =>
+                serie.markLine !== undefined &&
+                (serie.encode.xRef.field === axisId ||
+                    serie.encode.yRef.field === axisId),
+        );
+    };
     const topAxisType = getAxisTypeFromField(
         topAxisXId ? itemsMap[topAxisXId] : undefined,
+        hasReferenceLine(topAxisXId),
     );
     const bottomAxisType =
         bottomAxisXId === EMPTY_X_AXIS
             ? 'category'
             : getAxisTypeFromField(
                   bottomAxisXId ? itemsMap[bottomAxisXId] : undefined,
+                  hasReferenceLine(bottomAxisXId),
               );
     // horizontal bar chart needs the type 'category' in the left/right axis
     const defaultRightAxisType = getAxisTypeFromField(
         rightAxisYId ? itemsMap[rightAxisYId] : undefined,
+        hasReferenceLine(rightAxisYId),
     );
     const rightAxisType =
         validCartesianConfig.layout.flipAxes &&
@@ -147,6 +191,7 @@ const getAxisType = ({
             : defaultRightAxisType;
     const defaultLeftAxisType = getAxisTypeFromField(
         leftAxisYId ? itemsMap[leftAxisYId] : undefined,
+        hasReferenceLine(leftAxisYId),
     );
     const leftAxisType =
         validCartesianConfig.layout.flipAxes &&
@@ -252,6 +297,7 @@ export type EChartSeries = {
     };
     data?: unknown[];
     showSymbol?: boolean;
+    symbolSize?: number;
 };
 
 const getFormattedValue = (
@@ -315,63 +361,61 @@ const maxDate = (a: number | string, b: string) => {
 };
 
 export const getMinAndMaxValues = (
-    axis: string | undefined,
+    series: string[] | undefined,
     rows: ResultRow[],
 ): (string | number)[] => {
-    if (!axis) return [];
+    if (!series || series.length === 0) return [];
 
-    return rows
-        .map((row) => row[axis]?.value.raw)
-        .reduce<(string | number)[]>(
-            (acc, value) => {
-                if (
-                    typeof value === 'string' &&
-                    moment(value, 'YYYY-MM-DD', false).isValid()
-                ) {
-                    // is date
-                    const min = minDate(acc[0], value);
-                    const max = maxDate(acc[1], value);
+    let rawValues = [];
+    for (const s of series) {
+        for (const row of rows) {
+            rawValues.push(row[s]?.value.raw);
+        }
+    }
+
+    return rawValues.reduce<(string | number)[]>(
+        (acc, value) => {
+            if (
+                typeof value === 'string' &&
+                dayjs(value, 'YYYY-MM-DD', false).isValid()
+            ) {
+                // is date
+                const min = minDate(acc[0], value);
+                const max = maxDate(acc[1], value);
+
+                return [min, max];
+            } else if (typeof value === 'string' || typeof value === 'number') {
+                // is number or numeric string
+                const currentNumber =
+                    typeof value === 'string' ? parseFloat(value) : value;
+                const currentMin =
+                    typeof acc[0] === 'string' ? parseFloat(acc[0]) : acc[0];
+                const currentMax =
+                    typeof acc[1] === 'string' ? parseFloat(acc[1]) : acc[1];
+
+                if (!isNaN(currentNumber)) {
+                    const min =
+                        currentNumber < currentMin ? currentNumber : currentMin;
+                    const max =
+                        currentNumber > currentMax ? currentNumber : currentMax;
 
                     return [min, max];
-                } else if (
-                    typeof value === 'string' ||
-                    typeof value === 'number'
-                ) {
-                    // is number or numeric string
-                    const currentNumber =
-                        typeof value === 'string' ? parseFloat(value) : value;
-                    const currentMin =
-                        typeof acc[0] === 'string'
-                            ? parseFloat(acc[0])
-                            : acc[0];
-                    const currentMax =
-                        typeof acc[1] === 'string'
-                            ? parseFloat(acc[1])
-                            : acc[1];
-
-                    if (!isNaN(currentNumber)) {
-                        const min =
-                            currentNumber < currentMin
-                                ? currentNumber
-                                : currentMin;
-                        const max =
-                            currentNumber > currentMax
-                                ? currentNumber
-                                : currentMax;
-
-                        return [min, max];
-                    }
                 }
-                return acc;
-            },
-            [0, 0],
-        );
+            } else {
+                // TODO: this case comes up more than it should given that
+                // this 'else' wasn't here before. We should maybe use getAxisType
+                // for this function
+            }
+            return acc;
+        },
+        [0, 0],
+    );
 };
 
 const getMinAndMaxReferenceLines = (
-    leftAxisYId: string | undefined,
-    rightAxisYId: string | undefined,
-    bottomAxisXId: string | undefined,
+    leftAxisFieldYIds: string[] | undefined,
+    rightAxisYFieldIds: string[] | undefined,
+    bottomAxisXFieldIds: string[] | undefined,
     resultsData: ApiQueryResults | undefined,
     series: Series[] | undefined,
     items: ItemsMap,
@@ -388,12 +432,12 @@ const getMinAndMaxReferenceLines = (
 
     const getMinAndMaxReferenceLineValues = (
         axis: string,
-        fieldId: string | undefined,
+        fieldIds: (string | undefined)[] | undefined,
     ): (string | number)[] => {
         const values = series.flatMap<string | number>((serie) => {
             const serieFieldId =
                 axis === 'yAxis' ? serie.encode.yRef : serie.encode.xRef;
-            if (serieFieldId.field !== fieldId) return [];
+            if (!fieldIds || !fieldIds.includes(serieFieldId.field)) return [];
 
             if (!serie.markLine) return [];
             const field = items[serieFieldId.field];
@@ -485,24 +529,24 @@ const getMinAndMaxReferenceLines = (
     };
 
     const [minValueLeftY, maxValueLeftY] = getMinAndMaxValues(
-        leftAxisYId,
+        leftAxisFieldYIds,
         resultsData.rows,
     );
     const [minValueRightY, maxValueRightY] = getMinAndMaxValues(
-        rightAxisYId,
+        rightAxisYFieldIds,
         resultsData.rows,
     );
     const [minValueX, maxValueX] = getMinAndMaxValues(
-        bottomAxisXId,
+        bottomAxisXFieldIds,
         resultsData.rows,
     );
 
     const [minReferenceLineX, maxReferenceLineX] =
-        getMinAndMaxReferenceLineValues('xAxis', bottomAxisXId);
+        getMinAndMaxReferenceLineValues('xAxis', bottomAxisXFieldIds);
     const [minReferenceLineLeftY, maxReferenceLineLeftY] =
-        getMinAndMaxReferenceLineValues('yAxis', leftAxisYId);
+        getMinAndMaxReferenceLineValues('yAxis', leftAxisFieldYIds);
     const [minReferenceLineRightY, maxReferenceLineRightY] =
-        getMinAndMaxReferenceLineValues('yAxis', rightAxisYId);
+        getMinAndMaxReferenceLineValues('yAxis', rightAxisYFieldIds);
 
     return {
         referenceLineMinX:
@@ -597,20 +641,29 @@ const getPivotSeries = ({
                     itemsMap[series.encode.yRef.field] && {
                         formatter: (value: any) => {
                             const field = itemsMap[series.encode.yRef.field];
+
                             if (isCustomDimension(field)) {
                                 return value;
                             }
                             if (isTableCalculation(field)) {
-                                return formatTableCalculationValue(
-                                    field as TableCalculation,
+                                return formatItemValue(
+                                    field,
                                     value?.value?.[yFieldHash],
                                 );
                             } else {
-                                return formatValue(value?.value?.[yFieldHash], {
-                                    format: field.format,
-                                    round: field.round,
-                                    compact: field.compact,
-                                });
+                                const defaultFormatOptions =
+                                    getCustomFormatFromLegacy({
+                                        format: field.format,
+                                        round: field.round,
+                                        compact: field.compact,
+                                    });
+                                const formatOptions = isMetric(field)
+                                    ? field.formatOptions
+                                    : undefined;
+                                return applyCustomFormat(
+                                    value?.value?.[yFieldHash],
+                                    formatOptions || defaultFormatOptions,
+                                );
                             }
                         },
                     }),
@@ -620,6 +673,31 @@ const getPivotSeries = ({
             },
         }),
     };
+};
+
+/**
+ * Get the series symbol configuration for a simple series
+ * This is used to hide the symbol if showSymbol is false for line and area charts
+ *
+ * Issue reference: https://github.com/apache/echarts/issues/19178
+ */
+const getSimpleSeriesSymbolConfig = (series: Series) => {
+    const { showSymbol, type } = series;
+    switch (type) {
+        case CartesianSeriesType.LINE:
+        case CartesianSeriesType.AREA:
+            return {
+                showSymbol: true,
+                symbolSize: showSymbol ? 4 : 0,
+            };
+        case CartesianSeriesType.BAR:
+        case CartesianSeriesType.SCATTER:
+            return {
+                showSymbol: showSymbol ?? true,
+            };
+        default:
+            return assertUnreachable(type, `unexpected series type: ${type}`);
+    }
 };
 
 type GetSimpleSeriesArg = {
@@ -664,7 +742,7 @@ const getSimpleSeries = ({
     tooltip: {
         valueFormatter: valueFormatter(yFieldHash, itemsMap),
     },
-    showSymbol: series.showSymbol ?? true,
+    ...getSimpleSeriesSymbolConfig(series),
     ...(series.label?.show && {
         label: {
             ...series.label,
@@ -676,16 +754,24 @@ const getSimpleSeries = ({
                             return value;
                         }
                         if (isTableCalculation(field)) {
-                            return formatTableCalculationValue(
-                                field as TableCalculation,
+                            return formatItemValue(
+                                field,
                                 value?.value?.[yFieldHash],
                             );
                         } else {
-                            return formatValue(value?.value?.[yFieldHash], {
-                                format: field.format,
-                                round: field.round,
-                                compact: field.compact,
-                            });
+                            const defaultFormatOptions =
+                                getCustomFormatFromLegacy({
+                                    format: field.format,
+                                    round: field.round,
+                                    compact: field.compact,
+                                });
+                            const formatOptions = isMetric(field)
+                                ? field.formatOptions
+                                : undefined;
+                            return applyCustomFormat(
+                                value?.value?.[yFieldHash],
+                                formatOptions || defaultFormatOptions,
+                            );
                         }
                     },
                 }),
@@ -749,16 +835,63 @@ const calculateWidthText = (text: string | undefined): number => {
     return width;
 };
 
-const getEchartAxis = ({
+const getLongestLabel = ({
+    resultsData,
+    axisId,
+}: {
+    resultsData?: ApiQueryResults;
+    axisId?: string;
+}): string | undefined => {
+    return (
+        axisId &&
+        resultsData?.rows
+            .map((row) => row[axisId]?.value.formatted)
+            .reduce<string>(
+                (acc, p) => (p && acc.length > p.length ? acc : p),
+                '',
+            )
+    );
+};
+
+const getWeekAxisConfig = (
+    axisId?: string,
+    axisField?: Field | TableCalculation | CustomDimension,
+    rows?: ResultRow[],
+) => {
+    if (!axisId || !rows || !axisField) return {};
+    if (
+        'timeInterval' in axisField &&
+        axisField.timeInterval === TimeFrames.WEEK
+    ) {
+        const [minX, maxX] = getMinAndMaxValues([axisId], rows || []);
+        const continuousWeekRange = [];
+        let nextDate = dayjs.utc(minX);
+        while (nextDate.isBefore(dayjs(maxX))) {
+            continuousWeekRange.push(nextDate.format());
+            nextDate = nextDate.add(1, 'week');
+        }
+        continuousWeekRange.push(dayjs.utc(maxX).format());
+        return {
+            data: continuousWeekRange,
+            axisTick: { alignWithLabel: true, interval: 0 },
+        };
+    } else {
+        return {};
+    }
+};
+
+const getEchartAxes = ({
     itemsMap,
     validCartesianConfig,
     series,
     resultsData,
+    minsAndMaxes,
 }: {
     validCartesianConfig: CartesianChart;
     itemsMap: ItemsMap;
     series: EChartSeries[];
     resultsData: ApiQueryResults | undefined;
+    minsAndMaxes: ReturnType<typeof getResultValueArray>['minsAndMaxes'];
 }) => {
     const xAxisItemId = validCartesianConfig.layout.flipAxes
         ? validCartesianConfig.layout?.yField?.[0]
@@ -801,20 +934,31 @@ const getEchartAxis = ({
         [true, true],
     );
 
-    const getAxisFormatter = (axisItem: ItemsMap[string] | undefined) => {
-        const hasFormattingConfig =
-            isField(axisItem) &&
-            (axisItem.format || axisItem.round || axisItem.compact);
+    const getAxisFormatter = ({
+        axisItem,
+        longestLabelWidth,
+        rotate,
+        defaultNameGap,
+    }: {
+        axisItem: ItemsMap[string] | undefined;
+        longestLabelWidth?: number;
+        rotate?: number;
+        defaultNameGap?: number;
+    }) => {
+        const hasFormattingConfig = hasFormatting(axisItem);
+
         const axisMinInterval =
             isDimension(axisItem) &&
             axisItem.timeInterval &&
             isTimeInterval(axisItem.timeInterval) &&
             timeFrameConfigs[axisItem.timeInterval].getAxisMinInterval();
+
         const axisLabelFormatter =
             isDimension(axisItem) &&
             axisItem.timeInterval &&
             isTimeInterval(axisItem.timeInterval) &&
             timeFrameConfigs[axisItem.timeInterval].getAxisLabelFormatter();
+
         const axisConfig: Record<string, any> = {};
 
         if (axisItem && (hasFormattingConfig || axisMinInterval)) {
@@ -826,31 +970,92 @@ const getEchartAxis = ({
             axisConfig.axisPointer = {
                 label: {
                     formatter: (value: any) => {
-                        return formatItemValue(axisItem, value.value, false);
+                        return formatItemValue(axisItem, value.value, true);
                     },
                 },
             };
         } else if (axisLabelFormatter) {
             axisConfig.axisLabel = {
                 formatter: axisLabelFormatter,
+                rich: {
+                    bold: {
+                        fontWeight: 'bold',
+                    },
+                },
             };
             axisConfig.axisPointer = {
                 label: {
                     formatter: (value: any) => {
-                        return formatItemValue(axisItem, value.value, false);
+                        return formatItemValue(axisItem, value.value, true);
                     },
                 },
             };
-        } else if (axisItem !== undefined && isTableCalculation(axisItem)) {
+        } else if (
+            axisItem !== undefined &&
+            isTableCalculation(axisItem) &&
+            axisItem.type === undefined
+        ) {
             axisConfig.axisLabel = {
                 formatter: (value: any) => {
-                    return formatTableCalculationValue(axisItem, value);
+                    return formatItemValue(axisItem, value);
                 },
             };
+            axisConfig.axisPointer = {
+                label: {
+                    formatter: (value: any) => {
+                        return formatItemValue(axisItem, value.value);
+                    },
+                },
+            };
+        } else if (
+            axisItem &&
+            isDimension(axisItem) &&
+            axisItem.timeInterval &&
+            isTimeInterval(axisItem.timeInterval)
+        ) {
+            // Some int numbers are converted to float by default on echarts
+            // This is to ensure the value is correctly formatted on some types
+            switch (axisItem.timeInterval) {
+                case TimeFrames.WEEK_NUM:
+                case TimeFrames.WEEK:
+                    axisConfig.axisLabel = {
+                        formatter: (value: any) => {
+                            return formatItemValue(axisItem, value, true);
+                        },
+                    };
+                    axisConfig.axisPointer = {
+                        label: {
+                            formatter: (value: any) => {
+                                return formatItemValue(
+                                    axisItem,
+                                    value.value,
+                                    true,
+                                );
+                            },
+                        },
+                    };
+                    break;
+                default:
+            }
         }
         if (axisMinInterval) {
             axisConfig.minInterval = axisMinInterval;
         }
+
+        axisConfig.nameGap = defaultNameGap || 0;
+        if (rotate) {
+            const rotateRadians = (rotate * Math.PI) / 180;
+            const oppositeSide =
+                (longestLabelWidth || 0) * Math.sin(rotateRadians);
+            axisConfig.axisLabel = axisConfig.axisLabel || {};
+            axisConfig.axisLabel.rotate = rotate;
+            axisConfig.axisLabel.margin = 12;
+            axisConfig.nameGap = oppositeSide + 15;
+        } else {
+            axisConfig.axisLabel = axisConfig.axisLabel || {};
+            axisConfig.axisLabel.hideOverlap = true;
+        }
+
         return axisConfig;
     };
 
@@ -861,46 +1066,60 @@ const getEchartAxis = ({
             : true;
 
     // There is no Top x axis when no flipped
-    const topAxisXId = validCartesianConfig.layout.flipAxes
-        ? validCartesianConfig.eChartsConfig.series?.find(
-              (serie) => serie.yAxisIndex === 1,
-          )?.encode.yRef.field
+    const topAxisXFieldIds = validCartesianConfig.layout.flipAxes
+        ? validCartesianConfig.eChartsConfig.series
+              ?.filter((serie) => serie.yAxisIndex === 1)
+              .map((s) => s.encode.yRef.field)
         : undefined;
-    const bottomAxisXId = validCartesianConfig.layout.flipAxes
-        ? validCartesianConfig.eChartsConfig.series?.find(
-              (serie) => serie.yAxisIndex === 0,
-          )?.encode.yRef.field
-        : xAxisItemId;
 
-    const leftAxisYId = validCartesianConfig.layout.flipAxes
+    const topAxisXId = topAxisXFieldIds?.[0] || undefined;
+
+    const bottomAxisXFieldIds = validCartesianConfig.layout.flipAxes
+        ? validCartesianConfig.eChartsConfig.series
+              ?.filter((serie) => serie.yAxisIndex === 0)
+              .map((s) => s.encode.yRef.field)
+        : [];
+
+    const bottomAxisXId = bottomAxisXFieldIds?.[0] || xAxisItemId;
+
+    const longestValueXAxisTop: string | undefined = getLongestLabel({
+        resultsData,
+        axisId: topAxisXId,
+    });
+
+    const longestValueXAxisBottom: string | undefined = getLongestLabel({
+        resultsData,
+        axisId: bottomAxisXId,
+    });
+
+    const leftAxisYFieldIds = validCartesianConfig.layout.flipAxes
         ? validCartesianConfig.layout?.xField
-        : validCartesianConfig.eChartsConfig.series?.find(
-              (serie) => serie.yAxisIndex === 0,
-          )?.encode.yRef.field || yAxisItemId;
-    // There is no right Y axis when flipped
-    const rightAxisYId =
-        validCartesianConfig.eChartsConfig.series?.find(
-            (serie) => serie.yAxisIndex === 1,
-        )?.encode.yRef.field || validCartesianConfig.layout?.yField?.[1];
+            ? [validCartesianConfig.layout?.xField]
+            : []
+        : validCartesianConfig.eChartsConfig.series
+              ?.filter((serie) => serie.yAxisIndex === 0)
+              .map((s) => s.encode.yRef.field);
 
-    const longestValueYAxisLeft: string | undefined =
-        leftAxisYId &&
-        resultsData?.rows
-            .map((row) => row[leftAxisYId]?.value.formatted)
-            .reduce<string>(
-                (acc, p) => (p && acc.length > p.length ? acc : p),
-                '',
-            );
+    const leftAxisYId = leftAxisYFieldIds?.[0] || yAxisItemId;
+
+    // There is no right Y axis when flipped
+    const rightAxisYFieldIds = validCartesianConfig.eChartsConfig.series
+        ?.filter((serie) => serie.yAxisIndex === 1)
+        .map((s) => s.encode.yRef.field);
+
+    const rightAxisYId =
+        rightAxisYFieldIds?.[0] || validCartesianConfig.layout?.yField?.[1];
+
+    const longestValueYAxisLeft: string | undefined = getLongestLabel({
+        resultsData,
+        axisId: leftAxisYId,
+    });
     const leftYaxisGap = calculateWidthText(longestValueYAxisLeft);
 
-    const longestValueYAxisRight: string | undefined =
-        rightAxisYId &&
-        resultsData?.rows
-            .map((row) => row[rightAxisYId]?.value.formatted)
-            .reduce<string>(
-                (acc, p) => (p && acc.length > p.length ? acc : p),
-                '',
-            );
+    const longestValueYAxisRight: string | undefined = getLongestLabel({
+        resultsData,
+        axisId: rightAxisYId,
+    });
     const rightYaxisGap = calculateWidthText(longestValueYAxisRight);
 
     const rightAxisYField = rightAxisYId ? itemsMap[rightAxisYId] : undefined;
@@ -928,12 +1147,131 @@ const getEchartAxis = ({
         referenceLineMinRightY,
         referenceLineMaxRightY,
     } = getMinAndMaxReferenceLines(
-        leftAxisYId,
-        rightAxisYId,
-        bottomAxisXId,
+        leftAxisYFieldIds,
+        rightAxisYFieldIds,
+        bottomAxisXFieldIds,
         resultsData,
         validCartesianConfig.eChartsConfig.series,
         itemsMap,
+    );
+    const bottomAxisExtraConfig = getWeekAxisConfig(
+        bottomAxisXId,
+        bottomAxisXField,
+        resultsData?.rows,
+    );
+    const topAxisExtraConfig = getWeekAxisConfig(
+        topAxisXId,
+        topAxisXField,
+        resultsData?.rows,
+    );
+    const rightAxisExtraConfig = getWeekAxisConfig(
+        rightAxisYId,
+        rightAxisYField,
+        resultsData?.rows,
+    );
+    const leftAxisExtraConfig = getWeekAxisConfig(
+        leftAxisYId,
+        leftAxisYField,
+        resultsData?.rows,
+    );
+
+    const bottomAxisOffset = {
+        enabled:
+            !!xAxisConfiguration?.[0]?.minOffset ||
+            !!xAxisConfiguration?.[0]?.maxOffset,
+        minOffset:
+            xAxisConfiguration?.[0]?.minOffset !== undefined
+                ? parseFloat(xAxisConfiguration?.[0].minOffset)
+                : undefined,
+        maxOffset:
+            xAxisConfiguration?.[0]?.maxOffset !== undefined
+                ? parseFloat(xAxisConfiguration?.[0].maxOffset)
+                : undefined,
+    };
+
+    // Get the min and max values for the bottom X axis
+    const getMinAndMaxFromBottomAxisBounds = (
+        axisType: 'value' | 'category' | 'time' | string,
+        min?: number,
+        max?: number,
+    ) => {
+        if (axisType === 'value') {
+            const initialBottomAxisMin =
+                xAxisConfiguration?.[0]?.min ??
+                referenceLineMinX ??
+                maybeGetAxisDefaultMinValue(allowFirstAxisDefaultRange);
+
+            const initialBottomAxisMax =
+                xAxisConfiguration?.[0]?.max ??
+                referenceLineMaxX ??
+                maybeGetAxisDefaultMaxValue(allowFirstAxisDefaultRange);
+
+            // Apply offset to the min and max values of the axis
+            if (
+                bottomAxisOffset.enabled &&
+                min !== undefined &&
+                max !== undefined
+            ) {
+                const minX =
+                    xAxisConfiguration?.[0]?.min !== undefined
+                        ? parseFloat(xAxisConfiguration?.[0]?.min)
+                        : min;
+                const maxX =
+                    xAxisConfiguration?.[0]?.max !== undefined
+                        ? parseFloat(xAxisConfiguration?.[0]?.max)
+                        : max;
+
+                // Apply logarithmic scaling to the range to determine offsets
+                // This is helpful when the range is very large, but also accomodates small ranges
+                const logRange = Number(Math.log1p(maxX - minX).toFixed(0));
+
+                // Baseline offset to ensure minimum value
+                const baselineOffset = 0.5;
+
+                let minOffset =
+                    ((bottomAxisOffset.minOffset ?? 0) / 100) * logRange +
+                    baselineOffset;
+                let maxOffset =
+                    ((bottomAxisOffset.maxOffset ?? 0) / 100) * logRange +
+                    baselineOffset;
+
+                return {
+                    min: minX - minOffset,
+                    max: maxX + maxOffset,
+                };
+            }
+            return {
+                min: initialBottomAxisMin,
+                max: initialBottomAxisMax,
+            };
+        }
+
+        // For category and time axis, we don't need to apply the offset
+        return {
+            min: undefined,
+            max: undefined,
+        };
+    };
+
+    const { minValue: bottomAxisMinValue, maxValue: bottomAxisMaxValue } =
+        bottomAxisOffset.enabled &&
+        xAxisItemId &&
+        minsAndMaxes &&
+        minsAndMaxes[xAxisItemId]
+            ? // Find the min and max values for the axis if the offset is enabled
+              {
+                  minValue: minsAndMaxes[xAxisItemId].min,
+                  maxValue: minsAndMaxes[xAxisItemId].max,
+              }
+            : {
+                  minValue: undefined,
+                  maxValue: undefined,
+              };
+
+    const bottomAxisBounds = getMinAndMaxFromBottomAxisBounds(
+        bottomAxisType,
+        bottomAxisMinValue,
+        bottomAxisMaxValue,
     );
 
     return {
@@ -955,26 +1293,26 @@ const getEchartAxis = ({
                           ? getDateGroupLabel(xAxisItem) ||
                             getItemLabelWithoutTableName(xAxisItem)
                           : undefined),
-                min: validCartesianConfig.layout.flipAxes
-                    ? xAxisConfiguration?.[0]?.min ||
-                      maybeGetAxisDefaultMinValue(allowFirstAxisDefaultRange)
-                    : referenceLineMinX,
-                max: validCartesianConfig.layout.flipAxes
-                    ? xAxisConfiguration?.[0]?.max ||
-                      maybeGetAxisDefaultMaxValue(allowFirstAxisDefaultRange)
-                    : referenceLineMaxX,
                 nameLocation: 'center',
-                nameGap: 30,
                 nameTextStyle: {
                     fontWeight: 'bold',
                 },
-                ...getAxisFormatter(bottomAxisXField),
+                ...getAxisFormatter({
+                    axisItem: bottomAxisXField,
+                    longestLabelWidth: calculateWidthText(
+                        longestValueXAxisBottom,
+                    ),
+                    rotate: xAxisConfiguration?.[0]?.rotate,
+                    defaultNameGap: 30,
+                }),
                 splitLine: {
                     show: validCartesianConfig.layout.flipAxes
                         ? showGridY
                         : showGridX,
                 },
                 inverse: !!xAxisConfiguration?.[0].inverse,
+                ...bottomAxisExtraConfig,
+                ...bottomAxisBounds,
             },
             {
                 type: topAxisType,
@@ -989,24 +1327,33 @@ const getEchartAxis = ({
                           series: validCartesianConfig.eChartsConfig.series,
                       })
                     : undefined,
-                min: validCartesianConfig.layout.flipAxes
-                    ? xAxisConfiguration?.[1]?.min ||
-                      maybeGetAxisDefaultMinValue(allowSecondAxisDefaultRange)
-                    : undefined,
-                max: validCartesianConfig.layout.flipAxes
-                    ? xAxisConfiguration?.[1]?.max ||
-                      maybeGetAxisDefaultMaxValue(allowSecondAxisDefaultRange)
-                    : undefined,
+                min:
+                    topAxisType === 'value'
+                        ? xAxisConfiguration?.[1]?.min ||
+                          maybeGetAxisDefaultMinValue(
+                              allowSecondAxisDefaultRange,
+                          )
+                        : undefined,
+                max:
+                    topAxisType === 'value'
+                        ? xAxisConfiguration?.[1]?.max ||
+                          maybeGetAxisDefaultMaxValue(
+                              allowSecondAxisDefaultRange,
+                          )
+                        : undefined,
                 nameLocation: 'center',
-                nameGap: 30,
-                ...getAxisFormatter(topAxisXField),
-
+                ...getAxisFormatter({
+                    axisItem: topAxisXField,
+                    longestLabelWidth: calculateWidthText(longestValueXAxisTop),
+                    defaultNameGap: 30,
+                }),
                 nameTextStyle: {
                     fontWeight: 'bold',
                 },
                 splitLine: {
                     show: isAxisTheSameForAllSeries,
                 },
+                ...topAxisExtraConfig,
             },
         ],
         yAxis: [
@@ -1027,29 +1374,38 @@ const getEchartAxis = ({
                           itemsMap,
                           series: validCartesianConfig.eChartsConfig.series,
                       }),
-                min: !validCartesianConfig.layout.flipAxes
-                    ? yAxisConfiguration?.[0]?.min ||
-                      referenceLineMinLeftY ||
-                      maybeGetAxisDefaultMinValue(allowFirstAxisDefaultRange)
-                    : undefined,
-                max: !validCartesianConfig.layout.flipAxes
-                    ? yAxisConfiguration?.[0]?.max ||
-                      referenceLineMaxLeftY ||
-                      maybeGetAxisDefaultMaxValue(allowFirstAxisDefaultRange)
-                    : undefined,
+                min:
+                    leftAxisType === 'value'
+                        ? yAxisConfiguration?.[0]?.min ||
+                          referenceLineMinLeftY ||
+                          maybeGetAxisDefaultMinValue(
+                              allowFirstAxisDefaultRange,
+                          )
+                        : undefined,
+                max:
+                    leftAxisType === 'value'
+                        ? yAxisConfiguration?.[0]?.max ||
+                          referenceLineMaxLeftY ||
+                          maybeGetAxisDefaultMaxValue(
+                              allowFirstAxisDefaultRange,
+                          )
+                        : undefined,
                 nameTextStyle: {
                     fontWeight: 'bold',
                     align: 'center',
                 },
                 nameLocation: 'center',
-                nameGap: leftYaxisGap + 20,
-                ...getAxisFormatter(leftAxisYField),
+                ...getAxisFormatter({
+                    axisItem: leftAxisYField,
+                    defaultNameGap: leftYaxisGap + 20,
+                }),
                 splitLine: {
                     show: validCartesianConfig.layout.flipAxes
                         ? showGridX
                         : showGridY,
                 },
                 inverse: !!yAxisConfiguration?.[0].inverse,
+                ...leftAxisExtraConfig,
             },
             {
                 type: rightAxisType,
@@ -1064,28 +1420,37 @@ const getEchartAxis = ({
                           itemsMap,
                           series: validCartesianConfig.eChartsConfig.series,
                       }),
-                min: !validCartesianConfig.layout.flipAxes
-                    ? yAxisConfiguration?.[1]?.min ||
-                      referenceLineMinRightY ||
-                      maybeGetAxisDefaultMinValue(allowSecondAxisDefaultRange)
-                    : undefined,
-                max: !validCartesianConfig.layout.flipAxes
-                    ? yAxisConfiguration?.[1]?.max ||
-                      referenceLineMaxRightY ||
-                      maybeGetAxisDefaultMaxValue(allowSecondAxisDefaultRange)
-                    : undefined,
+                min:
+                    rightAxisType === 'value'
+                        ? yAxisConfiguration?.[1]?.min ||
+                          referenceLineMinRightY ||
+                          maybeGetAxisDefaultMinValue(
+                              allowSecondAxisDefaultRange,
+                          )
+                        : undefined,
+                max:
+                    rightAxisType === 'value'
+                        ? yAxisConfiguration?.[1]?.max ||
+                          referenceLineMaxRightY ||
+                          maybeGetAxisDefaultMaxValue(
+                              allowSecondAxisDefaultRange,
+                          )
+                        : undefined,
                 nameTextStyle: {
                     fontWeight: 'bold',
                     align: 'center',
                 },
-                ...getAxisFormatter(rightAxisYField),
+                ...getAxisFormatter({
+                    axisItem: rightAxisYField,
+                    defaultNameGap: rightYaxisGap + 20,
+                }),
 
                 nameLocation: 'center',
                 nameRotate: -90,
-                nameGap: rightYaxisGap + 20,
                 splitLine: {
                     show: isAxisTheSameForAllSeries,
                 },
+                ...rightAxisExtraConfig,
             },
         ],
     };
@@ -1107,7 +1472,7 @@ const calculateStackTotal = (
 ) => {
     return series.reduce<number>((acc, s) => {
         const hash = flipAxis ? s.encode?.x : s.encode?.y;
-        const legendName = s.dimensions?.[1]?.displayName;
+        const legendName = s.name || s.dimensions?.[1]?.displayName;
         let selected = true;
         for (const key in selectedLegendNames) {
             if (legendName === key) {
@@ -1221,7 +1586,8 @@ const useEchartsCartesianConfig = (
         pivotDimensions,
         resultsData,
         itemsMap,
-        colorPalette,
+        getSeriesColor,
+        minimal,
     } = useVisualizationContext();
 
     const validCartesianConfig = useMemo(() => {
@@ -1276,25 +1642,41 @@ const useEchartsCartesianConfig = (
         );
     }, [validCartesianConfig, resultsData, itemsMap, pivotDimensions]);
 
-    const axis = useMemo(() => {
+    const resultsAndMinsAndMaxes = useMemo(
+        () => getResultValueArray(rows, true, true),
+        [rows],
+    );
+
+    const axes = useMemo(() => {
         if (!itemsMap || !validCartesianConfig) {
             return { xAxis: [], yAxis: [] };
         }
 
-        return getEchartAxis({
+        return getEchartAxes({
             itemsMap,
             series,
             validCartesianConfig,
             resultsData,
+            minsAndMaxes: resultsAndMinsAndMaxes.minsAndMaxes,
         });
-    }, [itemsMap, series, validCartesianConfig, resultsData]);
+    }, [
+        itemsMap,
+        validCartesianConfig,
+        series,
+        resultsData,
+        resultsAndMinsAndMaxes.minsAndMaxes,
+    ]);
 
-    const stackedSeries = useMemo(() => {
+    const stackedSeriesWithColorAssignments = useMemo(() => {
         if (!itemsMap) return;
-        const seriesWithValidStack = series.map<EChartSeries>((serie) => ({
-            ...serie,
-            stack: getValidStack(serie),
-        }));
+
+        const seriesWithValidStack = series.map<EChartSeries>((serie) => {
+            return {
+                ...serie,
+                color: getSeriesColor(serie),
+                stack: getValidStack(serie),
+            };
+        });
         return [
             ...seriesWithValidStack,
             ...getStackTotalSeries(
@@ -1311,43 +1693,48 @@ const useEchartsCartesianConfig = (
         itemsMap,
         validCartesianConfig?.layout.flipAxes,
         validCartesianConfigLegend,
+        getSeriesColor,
     ]);
-
-    const colors = useMemo<string[]>(() => {
-        //Do not use colors from hidden series
-        return validCartesianConfig?.eChartsConfig.series
-            ? validCartesianConfig.eChartsConfig.series.reduce<string[]>(
-                  (acc, serie, index) => {
-                      if (!serie.hidden)
-                          return [
-                              ...acc,
-                              colorPalette[index] ||
-                                  getDefaultSeriesColor(index),
-                          ];
-                      else return acc;
-                  },
-                  [],
-              )
-            : colorPalette;
-    }, [colorPalette, validCartesianConfig]);
 
     const sortedResults = useMemo(() => {
         const results =
             validCartesianConfig?.layout?.xField === EMPTY_X_AXIS
-                ? getResultValueArray(rows, true).map((s) => ({
+                ? resultsAndMinsAndMaxes.results.map((s) => ({
                       ...s,
                       [EMPTY_X_AXIS]: ' ',
                   }))
-                : getResultValueArray(rows, true);
+                : resultsAndMinsAndMaxes.results;
+
         try {
             if (!itemsMap) return results;
+            const xFieldId = validCartesianConfig?.layout.flipAxes
+                ? validCartesianConfig?.layout?.yField?.[0]
+                : validCartesianConfig?.layout?.xField;
 
-            const xFieldId = validCartesianConfig?.layout?.xField;
             if (xFieldId === undefined) return results;
+            const { min, max } = axes.xAxis[0];
+
+            const hasCustomRange =
+                (min !== undefined || max !== undefined) &&
+                (typeof min === 'string' || typeof max === 'string');
+
+            const resultsInRange = hasCustomRange
+                ? results.filter((result) => {
+                      const value = result[xFieldId];
+                      if (!value) return true;
+
+                      const isGreaterThan =
+                          min === undefined ||
+                          typeof min !== 'string' ||
+                          value > min;
+
+                      return isGreaterThan;
+                  })
+                : results;
 
             const alreadySorted =
                 resultsData?.metricQuery.sorts?.[0]?.fieldId === xFieldId;
-            if (alreadySorted) return results;
+            if (alreadySorted) return resultsInRange;
 
             const xField = itemsMap[xFieldId];
             const hasTotal = validCartesianConfig?.eChartsConfig?.series?.some(
@@ -1356,10 +1743,10 @@ const useEchartsCartesianConfig = (
 
             // If there is a total, we don't sort the results because we need to keep the same order on results
             // This could still cause issues if there is a total on bar chart axis, the sorting is wrong and one of the axis is a line chart
-            if (hasTotal) return results;
+            if (hasTotal) return resultsInRange;
 
             if (isCustomDimension(xField)) {
-                return results.sort((a, b) => {
+                return resultsInRange.sort((a, b) => {
                     if (
                         typeof a[xFieldId] === 'string' &&
                         typeof b[xFieldId] === 'string'
@@ -1377,13 +1764,13 @@ const useEchartsCartesianConfig = (
             }
             if (
                 xField !== undefined &&
-                results.length >= 0 &&
+                resultsInRange.length >= 0 &&
                 isDimension(xField) &&
                 [DimensionType.DATE, DimensionType.TIMESTAMP].includes(
                     xField.type,
                 )
             ) {
-                return results.sort((a, b) => {
+                return resultsInRange.sort((a, b) => {
                     if (
                         typeof a[xFieldId] === 'string' &&
                         typeof b[xFieldId] === 'string'
@@ -1396,16 +1783,19 @@ const useEchartsCartesianConfig = (
                 });
             }
 
-            return results;
+            return resultsInRange;
         } catch (e) {
             console.error('Unable to sort date results', e);
             return results;
         }
     }, [
         validCartesianConfig?.layout?.xField,
+        validCartesianConfig?.layout.flipAxes,
+        validCartesianConfig?.layout?.yField,
         validCartesianConfig?.eChartsConfig?.series,
-        rows,
+        resultsAndMinsAndMaxes.results,
         itemsMap,
+        axes.xAxis,
         resultsData?.metricQuery.sorts,
     ]);
 
@@ -1418,10 +1808,22 @@ const useEchartsCartesianConfig = (
             extraCssText: 'overflow-y: auto; max-height:280px;',
             axisPointer: {
                 type: 'shadow',
-                label: { show: true },
+                label: {
+                    show: true,
+                },
             },
             formatter: (params) => {
                 if (!Array.isArray(params) || !itemsMap) return '';
+
+                const flipAxes = validCartesianConfig?.layout.flipAxes;
+                const getTooltipHeader = () => {
+                    if (flipAxes && !('axisDim' in params[0])) {
+                        // When flipping axes, the axisValueLabel is the value, not the serie name
+                        return params[0].seriesName;
+                    }
+                    return params[0].axisValueLabel;
+                };
+                // When flipping axes, we get all series in the chart
 
                 const tooltipRows = params
                     .map((param) => {
@@ -1434,18 +1836,30 @@ const useEchartsCartesianConfig = (
                         } = param;
 
                         if (dimensionNames) {
-                            const dim =
-                                encode?.y[0] !== undefined
-                                    ? dimensionNames[encode?.y[0]]
-                                    : '';
-
-                            if (typeof value === 'object' && dim in value) {
+                            let dim = '';
+                            if (flipAxes) {
+                                // When flipping axes, the dimensionName is different
+                                dim = dimensionNames[1];
+                            } else {
+                                dim =
+                                    encode?.y?.[0] !== undefined
+                                        ? dimensionNames[encode?.y[0]]
+                                        : '';
+                            }
+                            const tooltipValue = (
+                                value as Record<string, unknown>
+                            )[dim];
+                            if (
+                                value &&
+                                typeof value === 'object' &&
+                                dim in value
+                            ) {
                                 return `
                             <tr>
                                 <td>${marker}</td>
                                 <td>${seriesName}</td>
                                 <td style="text-align: right;"><b>${getFormattedValue(
-                                    (value as Record<string, unknown>)[dim],
+                                    tooltipValue,
                                     dim.split('.')[0],
                                     itemsMap,
                                 )}</b></td>
@@ -1458,25 +1872,15 @@ const useEchartsCartesianConfig = (
                     .join('');
 
                 const dimensionId = params[0].dimensionNames?.[0];
-
                 if (dimensionId !== undefined) {
                     const field = itemsMap[dimensionId];
-
-                    if (
-                        isDimension(field) &&
-                        (field.type === DimensionType.DATE ||
-                            field.type === DimensionType.TIMESTAMP)
-                    ) {
-                        const date = (params[0].data as Record<string, any>)[
-                            dimensionId
-                        ]; // get full timestamp from data
-                        const dateFormatted = getFormattedValue(
-                            date,
-                            dimensionId,
-                            itemsMap,
-                            false,
+                    if (isTableCalculation(field)) {
+                        const tooltipHeader = formatItemValue(
+                            field,
+                            getTooltipHeader(),
                         );
-                        return `${dateFormatted}<br/><table>${tooltipRows}</table>`;
+
+                        return `${tooltipHeader}<br/><table>${tooltipRows}</table>`;
                     }
 
                     const hasFormat = isField(field)
@@ -1485,7 +1889,7 @@ const useEchartsCartesianConfig = (
 
                     if (hasFormat) {
                         const tooltipHeader = getFormattedValue(
-                            params[0].axisValueLabel,
+                            getTooltipHeader(),
                             dimensionId,
                             itemsMap,
                         );
@@ -1493,19 +1897,19 @@ const useEchartsCartesianConfig = (
                         return `${tooltipHeader}<br/><table>${tooltipRows}</table>`;
                     }
                 }
-                return `${params[0].axisValueLabel}<br/><table>${tooltipRows}</table>`;
+                return `${getTooltipHeader()}<br/><table>${tooltipRows}</table>`;
             },
         }),
-        [itemsMap],
+        [itemsMap, validCartesianConfig?.layout.flipAxes],
     );
 
     const eChartsOptions = useMemo(
         () => ({
-            xAxis: axis.xAxis,
-            yAxis: axis.yAxis,
+            xAxis: axes.xAxis,
+            yAxis: axes.yAxis,
             useUTC: true,
-            series: stackedSeries,
-            animation: !isInDashboard,
+            series: stackedSeriesWithColorAssignments,
+            animation: !(isInDashboard || minimal),
             legend: mergeLegendSettings(
                 validCartesianConfig?.eChartsConfig.legend,
                 validCartesianConfigLegend,
@@ -1522,31 +1926,33 @@ const useEchartsCartesianConfig = (
                     validCartesianConfig?.eChartsConfig.grid,
                 ),
             },
-            color: colors,
+            // We assign colors per series, so we specify an empty list here.
+            color: [],
         }),
         [
-            axis.xAxis,
-            axis.yAxis,
-            stackedSeries,
+            axes.xAxis,
+            axes.yAxis,
+            stackedSeriesWithColorAssignments,
             isInDashboard,
+            minimal,
             validCartesianConfig?.eChartsConfig.legend,
             validCartesianConfig?.eChartsConfig.grid,
             validCartesianConfigLegend,
             series,
             sortedResults,
             tooltip,
-            colors,
         ],
     );
 
     if (
         !itemsMap ||
-        series.length <= 0 ||
         rows.length <= 0 ||
+        !eChartsOptions ||
         !validCartesianConfig
     ) {
         return undefined;
     }
+
     return eChartsOptions;
 };
 

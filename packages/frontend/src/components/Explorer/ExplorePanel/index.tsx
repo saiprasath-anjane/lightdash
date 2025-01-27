@@ -1,9 +1,28 @@
-import { Skeleton, Stack } from '@mantine/core';
-import { FC, memo } from 'react';
+import { subject } from '@casl/ability';
+import {
+    convertFieldRefToFieldId,
+    ExploreType,
+    getAllReferences,
+    getItemId,
+    getVisibleFields,
+    isCustomBinDimension,
+    isCustomSqlDimension,
+} from '@lightdash/common';
+import { ActionIcon, Group, Menu, Skeleton, Stack, Text } from '@mantine/core';
+import { IconDots, IconPencil, IconTrash } from '@tabler/icons-react';
+import { memo, useMemo, useState, useTransition, type FC } from 'react';
+import { useParams } from 'react-router';
+import {
+    DeleteVirtualViewModal,
+    EditVirtualViewModal,
+} from '../../../features/virtualView';
 import { useExplore } from '../../../hooks/useExplore';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
+import useApp from '../../../providers/App/useApp';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import MantineIcon from '../../common/MantineIcon';
 import PageBreadcrumbs from '../../common/PageBreadcrumbs';
 import ExploreTree from '../ExploreTree';
+import { ItemDetailProvider } from '../ExploreTree/TableTree/ItemDetailProvider';
 
 const LoadingSkeleton = () => (
     <Stack>
@@ -24,6 +43,12 @@ interface ExplorePanelProps {
 }
 
 const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
+    const [isEditVirtualViewOpen, setIsEditVirtualViewOpen] = useState(false);
+    const [isDeleteVirtualViewOpen, setIsDeleteVirtualViewOpen] =
+        useState(false);
+    const [, startTransition] = useTransition();
+
+    const { projectUuid } = useParams<{ projectUuid: string }>();
     const activeTableName = useExplorerContext(
         (context) => context.state.unsavedChartVersion.tableName,
     );
@@ -31,9 +56,15 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
         (context) =>
             context.state.unsavedChartVersion.metricQuery.additionalMetrics,
     );
+    const dimensions = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.metricQuery.dimensions,
+    );
     const customDimensions = useExplorerContext(
         (context) =>
             context.state.unsavedChartVersion.metricQuery.customDimensions,
+    );
+    const metrics = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.metricQuery.metrics,
     );
     const activeFields = useExplorerContext(
         (context) => context.state.activeFields,
@@ -41,13 +72,72 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
     const toggleActiveField = useExplorerContext(
         (context) => context.actions.toggleActiveField,
     );
-    const { data, status } = useExplore(activeTableName);
+    const { data: explore, status } = useExplore(activeTableName);
+
+    const { user } = useApp();
+    const canManageVirtualViews = user.data?.ability?.can(
+        'manage',
+        subject('VirtualView', {
+            organizationUuid: user.data?.organizationUuid,
+            projectUuid,
+        }),
+    );
+
+    const missingFields = useMemo(() => {
+        if (explore) {
+            const visibleFields = getVisibleFields(explore);
+
+            const allFields = [
+                ...visibleFields,
+                ...(additionalMetrics || []),
+                ...(customDimensions || []),
+            ];
+            const selectedFields = [...metrics, ...dimensions];
+            const fieldIds = allFields.map((field) => getItemId(field));
+
+            const missingCustomMetrics = additionalMetrics?.filter((metric) => {
+                const table = explore.tables[metric.table];
+                return (
+                    !table ||
+                    (metric.baseDimensionName &&
+                        !table.dimensions[metric.baseDimensionName])
+                );
+            });
+
+            const missingCustomDimensions = customDimensions?.filter(
+                (customDimension) => {
+                    const isCustomBinDimensionMissing =
+                        isCustomBinDimension(customDimension) &&
+                        !fieldIds.includes(customDimension.dimensionId);
+
+                    const isCustomSqlDimensionMissing =
+                        isCustomSqlDimension(customDimension) &&
+                        getAllReferences(customDimension.sql)
+                            .map((ref) => convertFieldRefToFieldId(ref))
+                            .some(
+                                (refFieldId) => !fieldIds.includes(refFieldId),
+                            );
+
+                    return (
+                        isCustomBinDimensionMissing ||
+                        isCustomSqlDimensionMissing
+                    );
+                },
+            );
+
+            return {
+                all: selectedFields.filter((node) => !fieldIds.includes(node)),
+                customMetrics: missingCustomMetrics,
+                customDimensions: missingCustomDimensions,
+            };
+        }
+    }, [explore, additionalMetrics, metrics, dimensions, customDimensions]);
 
     if (status === 'loading') {
         return <LoadingSkeleton />;
     }
 
-    if (!data) return null;
+    if (!explore) return null;
 
     if (status === 'error') {
         if (onBack) onBack();
@@ -55,39 +145,92 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
     }
 
     return (
-        <>
-            <PageBreadcrumbs
-                size="md"
-                items={[
-                    ...(onBack
-                        ? [
-                              {
-                                  title: 'Tables',
-                                  onClick: onBack,
-                              },
-                          ]
-                        : []),
-                    {
-                        title: data.label,
-                        active: true,
-                        tooltipProps: {
-                            withinPortal: true,
-                            disabled: !data.tables[data.baseTable].description,
-                            label: data.tables[data.baseTable].description,
-                            position: 'right',
+        <Stack h="100%" sx={{ flexGrow: 1 }}>
+            <Group position="apart">
+                <PageBreadcrumbs
+                    size="md"
+                    items={[
+                        ...(onBack
+                            ? [
+                                  {
+                                      title: 'Tables',
+                                      onClick: onBack,
+                                  },
+                              ]
+                            : []),
+                        {
+                            title: explore.label,
+                            active: true,
                         },
-                    },
-                ]}
-            />
+                    ]}
+                />
+                {canManageVirtualViews &&
+                    explore.type === ExploreType.VIRTUAL && (
+                        <Menu withArrow offset={-2}>
+                            <Menu.Target>
+                                <ActionIcon variant="transparent">
+                                    <MantineIcon icon={IconDots} />
+                                </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                <Menu.Item
+                                    icon={<MantineIcon icon={IconPencil} />}
+                                    onClick={() => {
+                                        startTransition(() => {
+                                            setIsEditVirtualViewOpen(true);
+                                        });
+                                    }}
+                                >
+                                    <Text fz="xs" fw={500}>
+                                        Edit virtual view
+                                    </Text>
+                                </Menu.Item>
+                                <Menu.Item
+                                    icon={<MantineIcon icon={IconTrash} />}
+                                    color="red"
+                                    onClick={() => {
+                                        setIsDeleteVirtualViewOpen(true);
+                                    }}
+                                >
+                                    <Text fz="xs" fw={500}>
+                                        Delete
+                                    </Text>
+                                </Menu.Item>
+                            </Menu.Dropdown>
+                        </Menu>
+                    )}
+            </Group>
 
-            <ExploreTree
-                explore={data}
-                additionalMetrics={additionalMetrics || []}
-                selectedNodes={activeFields}
-                onSelectedFieldChange={toggleActiveField}
-                customDimensions={customDimensions}
-            />
-        </>
+            <ItemDetailProvider>
+                <ExploreTree
+                    explore={explore}
+                    additionalMetrics={additionalMetrics || []}
+                    selectedNodes={activeFields}
+                    onSelectedFieldChange={toggleActiveField}
+                    customDimensions={customDimensions}
+                    selectedDimensions={dimensions}
+                    missingFields={missingFields}
+                />
+            </ItemDetailProvider>
+
+            {isEditVirtualViewOpen && (
+                <EditVirtualViewModal
+                    opened={isEditVirtualViewOpen}
+                    onClose={() => setIsEditVirtualViewOpen(false)}
+                    activeTableName={activeTableName}
+                    setIsEditVirtualViewOpen={setIsEditVirtualViewOpen}
+                    explore={explore}
+                />
+            )}
+            {isDeleteVirtualViewOpen && projectUuid && (
+                <DeleteVirtualViewModal
+                    opened={isDeleteVirtualViewOpen}
+                    onClose={() => setIsDeleteVirtualViewOpen(false)}
+                    virtualViewName={activeTableName}
+                    projectUuid={projectUuid}
+                />
+            )}
+        </Stack>
     );
 });
 

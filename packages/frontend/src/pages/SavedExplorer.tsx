@@ -1,21 +1,26 @@
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 
-import { useEffect } from 'react';
+import { ResourceViewItemType } from '@lightdash/common';
+import { useCallback, useEffect, useMemo } from 'react';
 import ErrorState from '../components/common/ErrorState';
 import Page from '../components/common/Page/Page';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import Explorer from '../components/Explorer';
 import ExplorePanel from '../components/Explorer/ExplorePanel';
 import SavedChartsHeader from '../components/Explorer/SavedChartsHeader';
+import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
+import { useChartPinningMutation } from '../hooks/pinning/useChartPinningMutation';
+import { usePinnedItems } from '../hooks/pinning/usePinnedItems';
 import { useQueryResults } from '../hooks/useQueryResults';
 import { useSavedQuery } from '../hooks/useSavedQuery';
-import {
-    ExplorerProvider,
-    ExplorerSection,
-} from '../providers/ExplorerProvider';
+import useApp from '../providers/App/useApp';
+import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
+import { ExplorerSection } from '../providers/Explorer/types';
 
 const SavedExplorer = () => {
-    const { savedQueryUuid, mode } = useParams<{
+    const { health } = useApp();
+
+    const { savedQueryUuid, mode, projectUuid } = useParams<{
         savedQueryUuid: string;
         projectUuid: string;
         mode?: string;
@@ -23,7 +28,9 @@ const SavedExplorer = () => {
 
     const isEditMode = mode === 'edit';
 
-    const { data, isLoading, error } = useSavedQuery({
+    const { setDashboardChartInfo } = useDashboardStorage();
+
+    const { data, isInitialLoading, error } = useSavedQuery({
         id: savedQueryUuid,
     });
 
@@ -32,14 +39,39 @@ const SavedExplorer = () => {
         isViewOnly: !isEditMode,
     });
 
-    useEffect(() => {
-        if (data && data.dashboardUuid && data.dashboardName) {
-            sessionStorage.setItem('fromDashboard', data.dashboardName);
-            sessionStorage.setItem('dashboardUuid', data.dashboardUuid);
-        }
-    }, [data]);
+    const { mutate: togglePinChart } = useChartPinningMutation();
+    const { data: pinnedItems } = usePinnedItems(
+        projectUuid,
+        data?.pinnedListUuid ?? undefined,
+    );
 
-    if (isLoading) {
+    const handleChartPinning = useCallback(() => {
+        if (!savedQueryUuid) return;
+        togglePinChart({ uuid: savedQueryUuid });
+    }, [savedQueryUuid, togglePinChart]);
+
+    const isPinned = useMemo(() => {
+        return Boolean(
+            pinnedItems?.some(
+                (item) =>
+                    item.type === ResourceViewItemType.CHART &&
+                    item.data.uuid === data?.uuid,
+            ),
+        );
+    }, [data?.uuid, pinnedItems]);
+
+    useEffect(() => {
+        // If the saved explore is part of a dashboard, set the dashboard chart info
+        // so we can show the banner + the user can navigate back to the dashboard easily
+        if (data && data.dashboardUuid && data.dashboardName) {
+            setDashboardChartInfo({
+                name: data.dashboardName,
+                dashboardUuid: data.dashboardUuid,
+            });
+        }
+    }, [data, setDashboardChartInfo]);
+
+    if (isInitialLoading) {
         return (
             <div style={{ marginTop: '20px' }}>
                 <SuboptimalState title="Loading..." loading />
@@ -67,6 +99,9 @@ const SavedExplorer = () => {
                               pivotConfig: data.pivotConfig,
                           },
                           modals: {
+                              format: {
+                                  isOpen: false,
+                              },
                               additionalMetric: {
                                   isOpen: false,
                               },
@@ -78,10 +113,16 @@ const SavedExplorer = () => {
                     : undefined
             }
             savedChart={data}
+            defaultLimit={health.data?.query.defaultLimit}
         >
             <Page
                 title={data?.name}
-                header={<SavedChartsHeader />}
+                header={
+                    <SavedChartsHeader
+                        onTogglePin={handleChartPinning}
+                        isPinned={isPinned}
+                    />
+                }
                 sidebar={<ExplorePanel />}
                 isSidebarOpen={isEditMode}
                 withFullHeight

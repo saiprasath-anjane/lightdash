@@ -1,8 +1,8 @@
 import { Box, Button, createStyles, keyframes, Stack } from '@mantine/core';
 import { IconCheck } from '@tabler/icons-react';
 import confetti from 'canvas-confetti';
-import { FC } from 'react';
-import { Link } from 'react-router-dom';
+import { type FC } from 'react';
+import { Link } from 'react-router';
 import MantineIcon from '../../common/MantineIcon';
 import { ProjectCreationCard } from '../../common/Settings/SettingsCard';
 import { OnboardingTitle } from './common/OnboardingTitle';
@@ -52,7 +52,7 @@ const ConnectSuccess: FC<ConnectSuccessProps> = ({ projectUuid }) => {
 
                             const rect = el.getBoundingClientRect();
 
-                            confetti({
+                            void confetti({
                                 disableForReducedMotion: true,
                                 startVelocity: 30,
                                 particleCount: 100,

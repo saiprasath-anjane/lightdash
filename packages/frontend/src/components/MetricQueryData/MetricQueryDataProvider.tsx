@@ -1,97 +1,7 @@
-import {
-    Explore,
-    formatItemValue,
-    getItemId,
-    hashFieldReference,
-    isDimension,
-    ItemsMap,
-    MetricQuery,
-    PivotReference,
-    ResultValue,
-} from '@lightdash/common';
-import { createContext, FC, useCallback, useContext, useState } from 'react';
-import { EChartSeries } from '../../hooks/echarts/useEchartsCartesianConfig';
-import { EchartSeriesClickEvent } from '../SimpleChart';
-
-export type UnderlyingDataConfig = {
-    item: ItemsMap[string] | undefined;
-    value: ResultValue;
-    fieldValues: Record<string, ResultValue>;
-    dimensions?: string[];
-    pivotReference?: PivotReference;
-};
-
-export type DrillDownConfig = {
-    item: ItemsMap[string];
-    fieldValues: Record<string, ResultValue>;
-    pivotReference?: PivotReference;
-};
-
-type MetricQueryDataContext = {
-    tableName: string;
-    explore: Explore | undefined;
-    metricQuery?: MetricQuery;
-
-    underlyingDataConfig: UnderlyingDataConfig | undefined;
-    isUnderlyingDataModalOpen: boolean;
-    openUnderlyingDataModal: (config: UnderlyingDataConfig) => void;
-    closeUnderlyingDataModal: () => void;
-
-    drillDownConfig: DrillDownConfig | undefined;
-    isDrillDownModalOpen: boolean;
-    openDrillDownModal: (config: DrillDownConfig) => void;
-    closeDrillDownModal: () => void;
-};
-
-export const getDataFromChartClick = (
-    e: EchartSeriesClickEvent,
-    itemsMap: ItemsMap,
-    series: EChartSeries[],
-): UnderlyingDataConfig => {
-    const pivotReference = series[e.seriesIndex]?.pivotReference;
-    const selectedFields = Object.values(itemsMap).filter((item) => {
-        if (
-            !isDimension(item) &&
-            pivotReference &&
-            pivotReference.field === getItemId(item)
-        ) {
-            return e.dimensionNames.includes(
-                hashFieldReference(pivotReference),
-            );
-        }
-        return e.dimensionNames.includes(getItemId(item));
-    });
-    const selectedMetricsAndTableCalculations = selectedFields.filter(
-        (item) => !isDimension(item),
-    );
-
-    let selectedField: ItemsMap[string] | undefined = undefined;
-    if (selectedMetricsAndTableCalculations.length > 0) {
-        selectedField = selectedMetricsAndTableCalculations[0];
-    } else if (selectedFields.length > 0) {
-        selectedField = selectedFields[0];
-    }
-    const selectedValue = selectedField
-        ? e.data[getItemId(selectedField)]
-        : undefined;
-    const fieldValues: Record<string, ResultValue> = Object.entries(
-        e.data,
-    ).reduce((acc, entry) => {
-        const [key, val] = entry;
-        return { ...acc, [key]: { raw: val, formatted: val } };
-    }, {});
-
-    return {
-        item: selectedField,
-        value: {
-            raw: selectedValue,
-            formatted: formatItemValue(selectedField, selectedValue),
-        },
-        fieldValues,
-        pivotReference,
-    };
-};
-const Context = createContext<MetricQueryDataContext | undefined>(undefined);
+import { type Explore, type MetricQuery } from '@lightdash/common';
+import { useCallback, useState, type FC } from 'react';
+import { Context } from './context';
+import { type DrillDownConfig, type UnderlyingDataConfig } from './types';
 
 type Props = {
     tableName: string;
@@ -99,7 +9,7 @@ type Props = {
     metricQuery: MetricQuery | undefined;
 };
 
-const MetricQueryDataProvider: FC<Props> = ({
+const MetricQueryDataProvider: FC<React.PropsWithChildren<Props>> = ({
     tableName,
     explore,
     metricQuery,
@@ -155,21 +65,5 @@ const MetricQueryDataProvider: FC<Props> = ({
         </Context.Provider>
     );
 };
-
-export function useMetricQueryDataContext<S extends boolean = false>(
-    failSilently?: S,
-): S extends false
-    ? MetricQueryDataContext
-    : MetricQueryDataContext | undefined {
-    const context = useContext(Context);
-
-    if (context === undefined && failSilently !== true) {
-        throw new Error(
-            'useMetricQueryDataContext must be used within a UnderlyingDataProvider',
-        );
-    }
-
-    return context!;
-}
 
 export default MetricQueryDataProvider;

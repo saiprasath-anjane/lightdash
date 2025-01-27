@@ -1,11 +1,14 @@
-import { FilterableField } from './field';
-import { DashboardFilters } from './filter';
-import { ChartKind, SavedChartType } from './savedCharts';
-import { UpdatedByUser } from './user';
-import { ValidationSummary } from './validation';
+import { type FilterableDimension } from './field';
+import { type DashboardFilters } from './filter';
+import { type ChartKind, type SavedChartType } from './savedCharts';
+import { type SpaceShare } from './space';
+import { type UpdatedByUser } from './user';
+import { type ValidationSummary } from './validation';
 
 export enum DashboardTileTypes {
     SAVED_CHART = 'saved_chart',
+    SQL_CHART = 'sql_chart',
+    SEMANTIC_VIEWER_CHART = 'semantic_viewer_chart',
     MARKDOWN = 'markdown',
     LOOM = 'loom',
 }
@@ -17,6 +20,7 @@ type CreateDashboardTileBase = {
     y: number;
     h: number;
     w: number;
+    tabUuid: string | undefined;
 };
 
 type DashboardTileBase = Required<CreateDashboardTileBase>;
@@ -47,6 +51,29 @@ export type DashboardChartTileProperties = {
         belongsToDashboard?: boolean; // this should be required and not part of the "create" types, but we need to fix tech debt first. Open ticket https://github.com/lightdash/lightdash/issues/6450
         chartName?: string | null;
         lastVersionChartKind?: ChartKind | null;
+        chartSlug?: string;
+    };
+};
+
+export type DashboardSqlChartTileProperties = {
+    type: DashboardTileTypes.SQL_CHART;
+    properties: {
+        title?: string;
+        savedSqlUuid: string | null;
+        chartName: string;
+        hideTitle?: boolean;
+        chartSlug?: string;
+    };
+};
+
+export type DashboardSemanticViewerChartTileProperties = {
+    type: DashboardTileTypes.SEMANTIC_VIEWER_CHART;
+    properties: {
+        title?: string;
+        savedSemanticViewerChartUuid: string | null;
+        chartName: string;
+        hideTitle?: boolean;
+        chartSlug?: string;
     };
 };
 
@@ -64,6 +91,16 @@ export type CreateDashboardChartTile = CreateDashboardTileBase &
 export type DashboardChartTile = DashboardTileBase &
     DashboardChartTileProperties;
 
+export type CreateDashboardSqlChartTile = CreateDashboardTileBase &
+    DashboardSqlChartTileProperties;
+export type DashboardSqlChartTile = DashboardTileBase &
+    DashboardSqlChartTileProperties;
+
+export type CreateDashboardSemanticViewerChartTile = CreateDashboardTileBase &
+    DashboardSemanticViewerChartTileProperties;
+export type DashboardSemanticViewerChartTile = DashboardTileBase &
+    DashboardSemanticViewerChartTileProperties;
+
 export const isChartTile = (
     tile: DashboardTileBase,
 ): tile is DashboardChartTile => tile.type === DashboardTileTypes.SAVED_CHART;
@@ -75,24 +112,66 @@ export type CreateDashboard = {
         | CreateDashboardChartTile
         | CreateDashboardMarkdownTile
         | CreateDashboardLoomTile
+        | CreateDashboardSqlChartTile
+        | CreateDashboardSemanticViewerChartTile
     >;
     filters?: DashboardFilters;
     updatedByUser?: Pick<UpdatedByUser, 'userUuid'>;
     spaceUuid?: string;
+    tabs: DashboardTab[];
+    config?: DashboardConfig;
 };
 
 export type DashboardTile =
     | DashboardChartTile
     | DashboardMarkdownTile
-    | DashboardLoomTile;
+    | DashboardLoomTile
+    | DashboardSqlChartTile
+    | DashboardSemanticViewerChartTile;
 
 export const isDashboardChartTileType = (
     tile: DashboardTile,
 ): tile is DashboardChartTile => tile.type === DashboardTileTypes.SAVED_CHART;
 
+export const isDashboardMarkdownTileType = (
+    tile: DashboardTile,
+): tile is DashboardMarkdownTile => tile.type === DashboardTileTypes.MARKDOWN;
+
+export const isDashboardLoomTileType = (
+    tile: DashboardTile,
+): tile is DashboardLoomTile => tile.type === DashboardTileTypes.LOOM;
+
+export const isDashboardSqlChartTile = (
+    tile: DashboardTileBase,
+): tile is DashboardSqlChartTile => tile.type === DashboardTileTypes.SQL_CHART;
+
+export const isDashboardSemanticViewerChartTile = (
+    tile: DashboardTileBase,
+): tile is DashboardSemanticViewerChartTile =>
+    tile.type === DashboardTileTypes.SEMANTIC_VIEWER_CHART;
+
+export type DashboardTab = {
+    uuid: string;
+    name: string;
+    order: number;
+};
+
+export type DashboardTabWithUrls = DashboardTab & {
+    nextUrl: string | null;
+    prevUrl: string | null;
+    selfUrl: string;
+};
+
+export type DashboardDAO = Omit<Dashboard, 'isPrivate' | 'access'>;
+
+export type DashboardConfig = {
+    isDateZoomDisabled: boolean;
+};
+
 export type Dashboard = {
     organizationUuid: string;
     projectUuid: string;
+    dashboardVersionId: number;
     uuid: string;
     name: string;
     description?: string;
@@ -106,6 +185,29 @@ export type Dashboard = {
     firstViewedAt: Date | string | null;
     pinnedListUuid: string | null;
     pinnedListOrder: number | null;
+    tabs: DashboardTab[];
+    isPrivate: boolean | null;
+    access: SpaceShare[] | null;
+    slug: string;
+    config?: DashboardConfig;
+};
+
+export enum DashboardSummaryTone {
+    FRIENDLY = 'friendly',
+    FORMAL = 'formal',
+    DIRECT = 'direct',
+    ENTHUSIASTIC = 'enthusiastic',
+}
+
+export type DashboardSummary = {
+    dashboardSummaryUuid: string;
+    dashboardUuid: string;
+    dashboardVersionId: number;
+    context?: string | null;
+    tone: DashboardSummaryTone;
+    audiences: string[];
+    summary: string;
+    createdAt: Date;
 };
 
 export type DashboardBasicDetails = Pick<
@@ -124,6 +226,10 @@ export type DashboardBasicDetails = Pick<
     | 'pinnedListOrder'
 > & { validationErrors?: ValidationSummary[] };
 
+export type DashboardBasicDetailsWithTileTypes = DashboardBasicDetails & {
+    tileTypes: DashboardTileTypes[];
+};
+
 export type SpaceDashboard = DashboardBasicDetails;
 
 export type DashboardUnversionedFields = Pick<
@@ -133,7 +239,7 @@ export type DashboardUnversionedFields = Pick<
 
 export type DashboardVersionedFields = Pick<
     CreateDashboard,
-    'tiles' | 'filters' | 'updatedByUser'
+    'tiles' | 'filters' | 'updatedByUser' | 'tabs' | 'config'
 >;
 
 export type UpdateDashboardDetails = Pick<Dashboard, 'name' | 'description'>;
@@ -150,7 +256,7 @@ export type UpdateMultipleDashboards = Pick<
 
 export type DashboardAvailableFilters = {
     savedQueryFilters: Record<string, number[]>;
-    allFilterableFields: FilterableField[];
+    allFilterableFields: FilterableDimension[];
 };
 
 export type SavedChartsInfoForDashboardAvailableFilters = {
@@ -193,7 +299,33 @@ export const getDefaultChartTileSize = (
     }
 };
 
-export const hasChartsInDashboard = (dashboard: Dashboard) =>
+export const hasChartsInDashboard = (dashboard: DashboardDAO) =>
     dashboard.tiles.some(
         (tile) => isChartTile(tile) && tile.properties.belongsToDashboard,
     );
+
+export type ApiGetDashboardsResponse = {
+    status: 'ok';
+    results: DashboardBasicDetailsWithTileTypes[];
+};
+
+export type ApiCreateDashboardResponse = {
+    status: 'ok';
+    results: Dashboard;
+};
+
+export type ApiUpdateDashboardsResponse = {
+    status: 'ok';
+    results: Dashboard[];
+};
+
+export type DuplicateDashboardParams = {
+    dashboardName: string;
+    dashboardDesc: string;
+};
+
+export function isDuplicateDashboardParams(
+    params: DuplicateDashboardParams | CreateDashboard,
+): params is DuplicateDashboardParams {
+    return 'dashboardName' in params && 'dashboardDesc' in params;
+}

@@ -1,14 +1,14 @@
-import { mergeRefs } from '@mantine/hooks';
-import { forwardRef } from 'react';
 import {
     DragDropContext,
     Draggable,
     Droppable,
-    DropResult,
-} from 'react-beautiful-dnd';
-import { Props } from '.';
+    type DropResult,
+} from '@hello-pangea/dnd';
+import { mergeRefs } from '@mantine/hooks';
+import { forwardRef } from 'react';
+import { type Props } from '.';
 import { useColumns } from '../../hooks/useColumns';
-import { useExplorerContext } from '../../providers/ExplorerProvider';
+import useExplorerContext from '../../providers/Explorer/useExplorerContext';
 import SortItem from './SortItem';
 
 const Sorting = forwardRef<HTMLDivElement, Props>(

@@ -1,10 +1,11 @@
 import {
-    ConditionalOperator,
-    Dashboard,
-    DashboardFilterRule,
     FilterType,
     getFilterTypeFromItem,
-    SchedulerFilterRule,
+    type ConditionalOperator,
+    type Dashboard,
+    type DashboardFilterRule,
+    type FilterableDimension,
+    type SchedulerFilterRule,
 } from '@lightdash/common';
 import {
     ActionIcon,
@@ -16,27 +17,30 @@ import {
     Stack,
     Text,
     Tooltip,
+    useMantineTheme,
 } from '@mantine/core';
-import { IconPencil, IconRotate2 } from '@tabler/icons-react';
-import { FC, useCallback, useMemo, useState } from 'react';
+import {
+    IconAlertTriangle,
+    IconPencil,
+    IconRotate2,
+} from '@tabler/icons-react';
+import { useCallback, useMemo, useState, type FC } from 'react';
 import FieldIcon from '../../../components/common/Filters/FieldIcon';
 import FieldLabel from '../../../components/common/Filters/FieldLabel';
+import FilterInputComponent from '../../../components/common/Filters/FilterInputs';
 import {
-    FilterInputComponent,
     getConditionalRuleLabel,
     getFilterOperatorOptions,
-} from '../../../components/common/Filters/FilterInputs';
-import {
-    FiltersProvider,
-    useFiltersContext,
-} from '../../../components/common/Filters/FiltersProvider';
+} from '../../../components/common/Filters/FilterInputs/utils';
+import FiltersProvider from '../../../components/common/Filters/FiltersProvider';
+import useFiltersContext from '../../../components/common/Filters/useFiltersContext';
 import MantineIcon from '../../../components/common/MantineIcon';
 import {
     hasSavedFilterValueChanged,
     isFilterEnabled,
 } from '../../../components/DashboardFilter/FilterConfiguration/utils';
 import { useProject } from '../../../hooks/useProject';
-import { useDashboardContext } from '../../../providers/DashboardProvider';
+import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
 
 const FilterSummaryLabel: FC<
     { filterSummary: ReturnType<typeof getConditionalRuleLabel> } & Record<
@@ -80,18 +84,15 @@ const FilterItem: FC<SchedulerFilterItemProps> = ({
     onRevert,
     hasChanged,
 }) => {
-    const { fieldsMap } = useFiltersContext();
-    const field = fieldsMap[dashboardFilter.target.fieldId];
+    const theme = useMantineTheme();
+    const { itemsMap } =
+        useFiltersContext<Record<string, FilterableDimension>>();
+    const field = itemsMap[dashboardFilter.target.fieldId];
     const [isEditing, setIsEditing] = useState(false);
 
     const filterType = useMemo(() => {
         return field ? getFilterTypeFromItem(field) : FilterType.STRING;
     }, [field]);
-
-    const filterSummary = getConditionalRuleLabel(
-        schedulerFilter ?? dashboardFilter,
-        field,
-    );
 
     const isDisabled = useMemo(
         () => Boolean((schedulerFilter ?? dashboardFilter).disabled),
@@ -101,6 +102,36 @@ const FilterItem: FC<SchedulerFilterItemProps> = ({
     const filterOperatorOptions = useMemo(() => {
         return getFilterOperatorOptions(filterType);
     }, [filterType]);
+
+    if (!field) {
+        // show invalid dashboard filter
+        return (
+            <Group spacing="xs" align="flex-start" noWrap>
+                <ActionIcon size="xs" disabled>
+                    <MantineIcon icon={IconRotate2} />
+                </ActionIcon>
+
+                <Stack key={dashboardFilter.id} spacing="xs" w="100%">
+                    <Group spacing="xs">
+                        <MantineIcon
+                            icon={IconAlertTriangle}
+                            color="red.6"
+                            style={{ color: theme.colors.red[6] }}
+                        />
+                        <Text span fw={500}>
+                            Invalid filter
+                        </Text>
+                        <Text fw={400} span>
+                            <Text span color="gray.6">
+                                Tried to reference field with unknown id:
+                            </Text>
+                            <Text span> {dashboardFilter.target.fieldId}</Text>
+                        </Text>
+                    </Group>
+                </Stack>
+            </Group>
+        );
+    }
 
     return (
         <Group spacing="xs" align="flex-start" noWrap>
@@ -137,7 +168,10 @@ const FilterItem: FC<SchedulerFilterItemProps> = ({
                     <>
                         {isEditing || hasChanged ? null : (
                             <FilterSummaryLabel
-                                filterSummary={filterSummary}
+                                filterSummary={getConditionalRuleLabel(
+                                    schedulerFilter ?? dashboardFilter,
+                                    field,
+                                )}
                                 isDisabled={isDisabled}
                             />
                         )}
@@ -246,10 +280,7 @@ const updateFilters = (
             ...(schedulerFilters ?? []),
             {
                 ...schedulerFilter,
-                disabled: !(
-                    filterToCompareAgainst.disabled &&
-                    filterToCompareAgainst.disabled === true
-                ),
+                disabled: !isFilterEnabled(schedulerFilter),
             },
         ];
     }
@@ -266,13 +297,15 @@ const SchedulerFilters: FC<SchedulerFiltersProps> = ({
     schedulerFilters,
     onChange,
 }) => {
-    const { data: project, isLoading } = useProject(dashboard?.projectUuid);
+    const { data: project, isInitialLoading } = useProject(
+        dashboard?.projectUuid,
+    );
     const isLoadingDashboardFilters = useDashboardContext(
         (c) => c.isLoadingDashboardFilters,
     );
     const allFilters = useDashboardContext((c) => c.allFilters);
-    const fieldsWithSuggestions = useDashboardContext(
-        (c) => c.fieldsWithSuggestions,
+    const allFilterableFieldsMap = useDashboardContext(
+        (c) => c.allFilterableFieldsMap,
     );
     const originalDashboardFilters = dashboard?.filters;
     const dashboardFilterIds = useMemo(
@@ -312,7 +345,7 @@ const SchedulerFilters: FC<SchedulerFiltersProps> = ({
         [onChange, originalDashboardFilters, schedulerFiltersData],
     );
 
-    if (isLoading || isLoadingDashboardFilters || !project) {
+    if (isInitialLoading || isLoadingDashboardFilters || !project) {
         return (
             <Center component={Stack} h={100}>
                 <Loader color="gray" />
@@ -335,10 +368,10 @@ const SchedulerFilters: FC<SchedulerFiltersProps> = ({
     };
 
     return (
-        <FiltersProvider
+        <FiltersProvider<Record<string, FilterableDimension>>
             popoverProps={{ withinPortal: true }}
             projectUuid={project.projectUuid}
-            fieldsMap={fieldsWithSuggestions}
+            itemsMap={allFilterableFieldsMap}
             startOfWeek={project.warehouseConnection?.startOfWeek ?? undefined}
             dashboardFilters={allFilters}
         >

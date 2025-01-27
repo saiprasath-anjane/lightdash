@@ -1,5 +1,6 @@
 import {
-    AddSpaceShare,
+    AddSpaceGroupAccess,
+    AddSpaceUserAccess,
     ApiErrorPayload,
     ApiSpaceResponse,
     ApiSuccessEmpty,
@@ -8,7 +9,6 @@ import {
 } from '@lightdash/common';
 import {
     Body,
-    Controller,
     Delete,
     Get,
     Middlewares,
@@ -23,17 +23,17 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
-import { spaceService } from '../services/services';
 import {
     allowApiKeyAuthentication,
     isAuthenticated,
     unauthorisedInDemo,
 } from './authentication';
+import { BaseController } from './baseController';
 
 @Route('/api/v1/projects/{projectUuid}/spaces')
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('Spaces')
-export class SpaceController extends Controller {
+export class SpaceController extends BaseController {
     /**
      * Get details for a space in a project
      * @param projectUuid The uuid of the space's parent project
@@ -50,11 +50,9 @@ export class SpaceController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSpaceResponse> {
         this.setStatus(200);
-        const results = await spaceService.getSpace(
-            projectUuid,
-            req.user!,
-            spaceUuid,
-        );
+        const results = await this.services
+            .getSpaceService()
+            .getSpace(projectUuid, req.user!, spaceUuid);
         return {
             status: 'ok',
             results,
@@ -82,11 +80,9 @@ export class SpaceController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSpaceResponse> {
         this.setStatus(200);
-        const results = await spaceService.createSpace(
-            projectUuid,
-            req.user!,
-            body,
-        );
+        const results = await this.services
+            .getSpaceService()
+            .createSpace(projectUuid, req.user!, body);
         return {
             status: 'ok',
             results,
@@ -113,7 +109,7 @@ export class SpaceController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
-        await spaceService.deleteSpace(req.user!, spaceUuid);
+        await this.services.getSpaceService().deleteSpace(req.user!, spaceUuid);
         return {
             status: 'ok',
             results: undefined,
@@ -143,11 +139,9 @@ export class SpaceController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSpaceResponse> {
         this.setStatus(200);
-        const results = await spaceService.updateSpace(
-            req.user!,
-            spaceUuid,
-            body,
-        );
+        const results = await this.services
+            .getSpaceService()
+            .updateSpace(req.user!, spaceUuid, body);
         return {
             status: 'ok',
             results,
@@ -168,16 +162,23 @@ export class SpaceController extends Controller {
     ])
     @SuccessResponse('200', 'Success')
     @Post('{spaceUuid}/share')
-    @OperationId('AddSpaceShareToUser')
+    @OperationId('AddSpaceUserAccess')
     @Tags('Roles & Permissions')
-    async addSpaceShare(
+    async addSpaceUserAccess(
         @Path() projectUuid: string,
         @Path() spaceUuid: string,
-        @Body() body: AddSpaceShare,
+        @Body() body: AddSpaceUserAccess,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
-        await spaceService.addSpaceShare(req.user!, spaceUuid, body.userUuid);
+        await this.services
+            .getSpaceService()
+            .addSpaceUserAccess(
+                req.user!,
+                spaceUuid,
+                body.userUuid,
+                body.spaceRole,
+            );
         return {
             status: 'ok',
             results: undefined,
@@ -207,7 +208,79 @@ export class SpaceController extends Controller {
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
-        await spaceService.removeSpaceShare(req.user!, spaceUuid, userUuid);
+        await this.services
+            .getSpaceService()
+            .removeSpaceUserAccess(req.user!, spaceUuid, userUuid);
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Grant a group access to a space
+     * @param projectUuid The uuid of the space's parent project
+     * @param spaceUuid The uuid of the space to update
+     * @param groupUuid The uuid of the group to grant access to
+     * @param spaceRole The role for the group in the space
+     * @param req
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('{spaceUuid}/group/share')
+    @OperationId('AddSpaceGroupAccess')
+    @Tags('Roles & Permissions')
+    async addSpaceGroupAccess(
+        @Path() projectUuid: string,
+        @Path() spaceUuid: string,
+        @Body() body: AddSpaceGroupAccess,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        this.setStatus(200);
+        await this.services
+            .getSpaceService()
+            .addSpaceGroupAccess(
+                req.user!,
+                spaceUuid,
+                body.groupUuid,
+                body.spaceRole,
+            );
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Remove a group's access to a space
+     * @param projectUuid The uuid of the space's parent project
+     * @param spaceUuid The uuid of the space to update
+     * @param groupUuid The uuid of the group to revoke access from
+     * @param req
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Delete('{spaceUuid}/group/share/{groupUuid}')
+    @OperationId('RevokeGroupSpaceAccess')
+    @Tags('Roles & Permissions')
+    async revokeGroupSpaceAccess(
+        @Path() projectUuid: string,
+        @Path() spaceUuid: string,
+        @Path() groupUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        this.setStatus(200);
+        await this.services
+            .getSpaceService()
+            .removeSpaceGroupAccess(req.user!, spaceUuid, groupUuid);
         return {
             status: 'ok',
             results: undefined,

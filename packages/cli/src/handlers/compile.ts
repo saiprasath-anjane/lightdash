@@ -2,28 +2,29 @@ import {
     attachTypesToModels,
     convertExplores,
     DbtManifestVersion,
+    DEFAULT_SPOTLIGHT_CONFIG,
+    getCompiledModels,
+    getDbtManifestVersion,
+    getModelsFromManifest,
     getSchemaStructureFromDbtModels,
     isExploreError,
     isSupportedDbtAdapter,
-    isWeekDay,
+    loadLightdashProjectConfig,
     ParseError,
+    WarehouseCatalog,
 } from '@lightdash/common';
-import { warehouseClientFromCredentials } from '@lightdash/warehouses';
-import inquirer from 'inquirer';
+import { promises as fs } from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { LightdashAnalytics } from '../analytics/analytics';
 import { getDbtContext } from '../dbt/context';
-import { getDbtManifest, loadManifest } from '../dbt/manifest';
-import { getModelsFromManifest } from '../dbt/models';
-import {
-    loadDbtTarget,
-    warehouseCredentialsFromDbtTarget,
-} from '../dbt/profile';
+import { loadManifest } from '../dbt/manifest';
 import { validateDbtModel } from '../dbt/validation';
 import GlobalState from '../globalState';
 import * as styles from '../styles';
-import { dbtCompile, DbtCompileOptions } from './dbt/compile';
-import { getDbtVersion, isSupportedDbtVersion } from './dbt/getDbtVersion';
+import { DbtCompileOptions, maybeCompileModelsAndJoins } from './dbt/compile';
+import { getDbtVersion } from './dbt/getDbtVersion';
+import getWarehouseClient from './dbt/getWarehouseClient';
 
 export type CompileHandlerOptions = DbtCompileOptions & {
     projectDir: string;
@@ -35,74 +36,66 @@ export type CompileHandlerOptions = DbtCompileOptions & {
     startOfWeek?: number;
 };
 
+const readAndLoadLightdashProjectConfig = async (projectDir: string) => {
+    const configPath = path.join(projectDir, 'lightdash.config.yml');
+    try {
+        const fileContents = await fs.readFile(configPath, 'utf8');
+        const config = await loadLightdashProjectConfig(fileContents);
+        return config;
+    } catch (e) {
+        GlobalState.debug(`No lightdash.config.yml found in ${configPath}`);
+
+        if (e instanceof Error && 'code' in e && e.code === 'ENOENT') {
+            // Return default config if file doesn't exist
+            return {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+            };
+        }
+        throw e;
+    }
+};
+
 export const compile = async (options: CompileHandlerOptions) => {
     const dbtVersion = await getDbtVersion();
-    const manifestVersion = await getDbtManifest();
     GlobalState.debug(`> dbt version ${dbtVersion}`);
+    const executionId = uuidv4();
     await LightdashAnalytics.track({
         event: 'compile.started',
         properties: {
-            dbtVersion,
+            executionId,
+            dbtVersion: dbtVersion.verboseVersion,
+            useDbtList: !!options.useDbtList,
+            skipWarehouseCatalog: !!options.skipWarehouseCatalog,
+            skipDbtCompile: !!options.skipDbtCompile,
         },
     });
 
-    if (!isSupportedDbtVersion(dbtVersion)) {
-        if (process.env.CI === 'true') {
-            console.error(
-                `Your dbt version ${dbtVersion} does not match our supported versions (1.3.* - 1.7.*), this could cause problems on compile or validation.`,
-            );
-        } else {
-            const answers = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'isConfirm',
-                    message: `${styles.warning(
-                        `Your dbt version ${dbtVersion} does not match our supported version (1.3.* - 1.7.*), this could cause problems on compile or validation.`,
-                    )}\nDo you still want to continue?`,
-                },
-            ]);
-            if (!answers.isConfirm) {
-                throw new Error(`Unsupported dbt version ${dbtVersion}`);
-            }
-        }
-    }
-
-    // Skipping assumes manifest.json already exists.
-    if (!options.skipDbtCompile) {
-        await dbtCompile(options);
-    }
-
     const absoluteProjectPath = path.resolve(options.projectDir);
-    const absoluteProfilesPath = path.resolve(options.profilesDir);
 
     GlobalState.debug(`> Compiling with project dir ${absoluteProjectPath}`);
-    GlobalState.debug(`> Compiling with profiles dir ${absoluteProfilesPath}`);
 
     const context = await getDbtContext({ projectDir: absoluteProjectPath });
-    const profileName = options.profile || context.profileName;
-    const { target } = await loadDbtTarget({
-        profilesDir: absoluteProfilesPath,
-        profileName,
-        targetName: options.target,
+    const { warehouseClient } = await getWarehouseClient({
+        isDbtCloudCLI: dbtVersion.isDbtCloudCLI,
+        profilesDir: options.profilesDir,
+        profile: options.profile || context.profileName,
+        target: options.target,
+        startOfWeek: options.startOfWeek,
     });
 
-    GlobalState.debug(`> Compiling with profile ${profileName}`);
-    GlobalState.debug(`> Compiling with target ${target}`);
-
-    const credentials = await warehouseCredentialsFromDbtTarget(target);
-    const warehouseClient = warehouseClientFromCredentials({
-        ...credentials,
-        startOfWeek: isWeekDay(options.startOfWeek)
-            ? options.startOfWeek
-            : undefined,
-    });
+    const compiledModelIds: string[] | undefined =
+        await maybeCompileModelsAndJoins(
+            { targetDir: context.targetDir },
+            options,
+        );
     const manifest = await loadManifest({ targetDir: context.targetDir });
-    const models = getModelsFromManifest(manifest);
+    const manifestVersion = getDbtManifestVersion(manifest);
+    const manifestModels = getModelsFromManifest(manifest);
+    const compiledModels = getCompiledModels(manifestModels, compiledModelIds);
 
     const adapterType = manifest.metadata.adapter_type;
-
     const { valid: validModels, invalid: failedExplores } =
-        await validateDbtModel(adapterType, models);
+        await validateDbtModel(adapterType, manifestVersion, compiledModels);
 
     if (failedExplores.length > 0) {
         const errors = failedExplores.map((failedExplore) =>
@@ -118,10 +111,16 @@ ${errors.join('')}`),
         );
     }
 
-    // Ideally we'd skip this potentially expensive step
-    const catalog = await warehouseClient.getCatalog(
-        getSchemaStructureFromDbtModels(validModels),
-    );
+    // Skipping assumes yml has the field types.
+    let catalog: WarehouseCatalog = {};
+    if (!options.skipWarehouseCatalog) {
+        GlobalState.debug('> Fetching warehouse catalog');
+        catalog = await warehouseClient.getCatalog(
+            getSchemaStructureFromDbtModels(validModels),
+        );
+    } else {
+        GlobalState.debug('> Skipping warehouse catalog');
+    }
 
     const validModelsWithTypes = attachTypesToModels(
         validModels,
@@ -133,7 +132,8 @@ ${errors.join('')}`),
         await LightdashAnalytics.track({
             event: 'compile.error',
             properties: {
-                dbtVersion,
+                executionId,
+                dbtVersion: dbtVersion.verboseVersion,
                 error: `Dbt adapter ${manifest.metadata.adapter_type} is not supported`,
             },
         });
@@ -145,16 +145,30 @@ ${errors.join('')}`),
     GlobalState.debug(
         `> Converting explores with adapter: ${manifest.metadata.adapter_type}`,
     );
+
+    GlobalState.debug(
+        `> Loading lightdash project config from ${absoluteProjectPath}`,
+    );
+
+    const lightdashProjectConfig = await readAndLoadLightdashProjectConfig(
+        absoluteProjectPath,
+    );
+
+    GlobalState.debug(`> Loaded lightdash project config`);
+
     const validExplores = await convertExplores(
         validModelsWithTypes,
         false,
         manifest.metadata.adapter_type,
-        [DbtManifestVersion.V10, DbtManifestVersion.V11].includes(
-            manifestVersion,
-        )
+        [
+            DbtManifestVersion.V10,
+            DbtManifestVersion.V11,
+            DbtManifestVersion.V12,
+        ].includes(manifestVersion)
             ? []
             : Object.values(manifest.metrics),
         warehouseClient,
+        lightdashProjectConfig,
     );
     console.error('');
 
@@ -180,10 +194,11 @@ ${errors.join('')}`),
     await LightdashAnalytics.track({
         event: 'compile.completed',
         properties: {
+            executionId,
             explores: explores.length,
             errors,
             dbtMetrics: Object.values(manifest.metrics).length,
-            dbtVersion,
+            dbtVersion: dbtVersion.verboseVersion,
         },
     });
     return explores;

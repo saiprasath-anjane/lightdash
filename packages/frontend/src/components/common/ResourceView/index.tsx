@@ -1,4 +1,4 @@
-import { assertUnreachable, ResourceViewItem } from '@lightdash/common';
+import { assertUnreachable } from '@lightdash/common';
 import {
     Box,
     Divider,
@@ -11,52 +11,23 @@ import {
     useMantineTheme,
 } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, type FC } from 'react';
 import { useTableTabStyles } from '../../../hooks/styles/useTableTabStyles';
 import MantineIcon from '../MantineIcon';
-import ResourceActionHandlers, {
-    ResourceViewItemAction,
-    ResourceViewItemActionState,
-} from './ResourceActionHandlers';
-import ResourceEmptyState, {
-    ResourceEmptyStateProps,
-} from './ResourceEmptyState';
+import ResourceActionHandlers from './ResourceActionHandlers';
+import ResourceEmptyState from './ResourceEmptyState';
 import ResourceViewGrid, {
-    ResourceViewGridCommonProps,
+    type ResourceViewGridCommonProps,
 } from './ResourceViewGrid';
 import ResourceViewList, {
-    ResourceViewListCommonProps,
+    type ResourceViewListCommonProps,
 } from './ResourceViewList';
-
-type TabType = {
-    id: string;
-    name?: string;
-    icon?: JSX.Element;
-    infoTooltipText?: string;
-    sort?: (a: ResourceViewItem, b: ResourceViewItem) => number;
-    filter?: (item: ResourceViewItem, index: number) => boolean;
-};
-
-interface ResourceHeaderProps {
-    title?: string;
-    description?: string;
-    action?: React.ReactNode;
-}
-
-export interface ResourceViewCommonProps {
-    items: ResourceViewItem[];
-    tabs?: TabType[];
-    maxItems?: number;
-    headerProps?: ResourceHeaderProps;
-    emptyStateProps?: ResourceEmptyStateProps;
-    view?: ResourceViewType;
-    hasReorder?: boolean;
-}
-
-export enum ResourceViewType {
-    LIST = 'list',
-    GRID = 'grid',
-}
+import {
+    ResourceViewItemAction,
+    ResourceViewType,
+    type ResourceViewCommonProps,
+    type ResourceViewItemActionState,
+} from './types';
 
 interface ResourceViewProps extends ResourceViewCommonProps {
     listProps?: ResourceViewListCommonProps;
@@ -64,7 +35,7 @@ interface ResourceViewProps extends ResourceViewCommonProps {
     defaultActiveTab?: string;
 }
 
-const ResourceView: React.FC<ResourceViewProps> = ({
+const ResourceView: FC<ResourceViewProps> = ({
     view = ResourceViewType.LIST,
     items: allItems,
     maxItems,

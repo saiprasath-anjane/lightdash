@@ -1,30 +1,35 @@
 import {
+    CustomFormatType,
+    getErrorMessage,
+    getItemId,
     NumberSeparator,
-    TableCalculation,
-    TableCalculationFormat,
-    TableCalculationFormatType,
+    TableCalculationType,
+    type CustomFormat,
+    type TableCalculation,
 } from '@lightdash/common';
 import {
     ActionIcon,
     Button,
     Group,
     Modal,
-    ModalProps,
+    Select,
     Stack,
     Tabs,
     TextInput,
-    Title,
+    Tooltip,
     useMantineTheme,
+    type ModalProps,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconMaximize, IconMinimize } from '@tabler/icons-react';
-import { FC } from 'react';
+import { useRef, type FC } from 'react';
 import { useToggle } from 'react-use';
+import { type ValueOf } from 'type-fest';
 import MantineIcon from '../../../components/common/MantineIcon';
+import { FormatForm } from '../../../components/Explorer/FormatForm';
 import useToaster from '../../../hooks/toaster/useToaster';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import { getUniqueTableCalculationName } from '../utils';
-import { FormatForm } from './FormatForm';
 import { SqlForm } from './SqlForm';
 
 type Props = ModalProps & {
@@ -35,7 +40,8 @@ type Props = ModalProps & {
 type TableCalculationFormInputs = {
     name: string;
     sql: string;
-    format: TableCalculationFormat;
+    format: CustomFormat;
+    type?: TableCalculationType;
 };
 
 const TableCalculationModal: FC<Props> = ({
@@ -46,22 +52,27 @@ const TableCalculationModal: FC<Props> = ({
 }) => {
     const theme = useMantineTheme();
     const [isFullscreen, toggleFullscreen] = useToggle(false);
+    const submitButtonRef = useRef<HTMLButtonElement>(null);
 
-    const { showToastError } = useToaster();
+    const { addToastError } = useToaster();
 
     const tableCalculations = useExplorerContext(
         (context) =>
             context.state.unsavedChartVersion.metricQuery.tableCalculations,
+    );
+    const customDimensions = useExplorerContext(
+        (context) =>
+            context.state.unsavedChartVersion.metricQuery.customDimensions,
     );
 
     const form = useForm<TableCalculationFormInputs>({
         initialValues: {
             name: tableCalculation?.displayName || '',
             sql: tableCalculation?.sql || '',
+            type: tableCalculation?.type || TableCalculationType.NUMBER,
             format: {
                 type:
-                    tableCalculation?.format?.type ||
-                    TableCalculationFormatType.DEFAULT,
+                    tableCalculation?.format?.type || CustomFormatType.DEFAULT,
                 round: tableCalculation?.format?.round,
                 separator:
                     tableCalculation?.format?.separator ||
@@ -72,24 +83,78 @@ const TableCalculationModal: FC<Props> = ({
                 suffix: tableCalculation?.format?.suffix,
             },
         },
+        validate: {
+            name: (label) => {
+                if (!label) return null;
+
+                if (
+                    tableCalculation &&
+                    tableCalculation.displayName === label
+                ) {
+                    return null;
+                }
+
+                const isInvalid = [
+                    ...tableCalculations,
+                    ...(customDimensions ?? []),
+                ].some(
+                    (i) =>
+                        getItemId(i).toLowerCase().trim() ===
+                        label.toLowerCase().trim(),
+                );
+
+                return isInvalid
+                    ? 'Table calculation/Dimension with this label already exists'
+                    : null;
+            },
+        },
     });
 
     const handleSubmit = form.onSubmit((data) => {
         const { name, sql } = data;
+        // throw error if sql is empty
+        if (sql.length === 0) {
+            addToastError({
+                title: 'SQL cannot be empty',
+                key: 'table-calculation-modal',
+            });
+            return;
+        }
+        // throw error if name is empty
+        if (name.length === 0) {
+            addToastError({
+                title: 'Name cannot be empty',
+                key: 'table-calculation-modal',
+            });
+            return;
+        }
         try {
             onSave({
                 name: getUniqueTableCalculationName(name, tableCalculations),
                 displayName: name,
                 sql,
                 format: data.format,
+                type: data.type,
             });
         } catch (e) {
-            showToastError({
+            addToastError({
                 title: 'Error saving',
-                subtitle: e.message,
+                subtitle: getErrorMessage(e),
+                key: 'table-calculation-modal',
             });
         }
     });
+
+    const getFormatInputProps = (path: keyof CustomFormat) => {
+        return form.getInputProps(`format.${path}`);
+    };
+
+    const setFormatFieldValue = (
+        path: keyof CustomFormat,
+        value: ValueOf<CustomFormat>,
+    ) => {
+        return form.setFieldValue(`format.${path}`, value);
+    };
 
     return (
         <Modal
@@ -97,12 +162,22 @@ const TableCalculationModal: FC<Props> = ({
             onClose={() => onClose()}
             size="xl"
             title={
-                <Title order={5}>
-                    {tableCalculation
-                        ? 'Edit table calculation'
-                        : 'Add table calculation'}
-                </Title>
+                tableCalculation
+                    ? 'Edit table calculation'
+                    : 'Add table calculation'
             }
+            styles={{
+                title: {
+                    fontSize: theme.fontSizes.md,
+                    fontWeight: 700,
+                },
+                body: {
+                    paddingBottom: 0,
+                },
+                content: {
+                    maxHeight: '70vh !important',
+                },
+            }}
             fullScreen={isFullscreen}
         >
             <form name="table_calculation" onSubmit={handleSubmit}>
@@ -112,8 +187,10 @@ const TableCalculationModal: FC<Props> = ({
                         label="Name"
                         required
                         placeholder="E.g. Cumulative order count"
+                        data-testid="table-calculation-name-input"
                         {...form.getInputProps('name')}
                     />
+
                     <Tabs
                         defaultValue="sqlEditor"
                         color="indigo"
@@ -136,14 +213,58 @@ const TableCalculationModal: FC<Props> = ({
                             <Tabs.Tab value="format">Format</Tabs.Tab>
                         </Tabs.List>
                         <Tabs.Panel value="sqlEditor">
-                            <SqlForm form={form} isFullScreen={isFullscreen} />
+                            <SqlForm
+                                form={form}
+                                isFullScreen={isFullscreen}
+                                focusOnRender={true}
+                                onCmdEnter={() => {
+                                    if (submitButtonRef.current) {
+                                        submitButtonRef.current.click();
+                                    }
+                                }}
+                            />
                         </Tabs.Panel>
-                        <Tabs.Panel value="format">
-                            <FormatForm form={form} />
+                        <Tabs.Panel value="format" p="sm">
+                            <FormatForm
+                                formatInputProps={getFormatInputProps}
+                                setFormatFieldValue={setFormatFieldValue}
+                                format={form.values.format}
+                            />
                         </Tabs.Panel>
                     </Tabs>
-
-                    <Group position="apart">
+                    <Tooltip
+                        position="bottom"
+                        withArrow
+                        multiline
+                        maw={400}
+                        withinPortal
+                        label={
+                            'Manually select the type of the result of this SQL table calculation, this will help us to treat this field correctly in filters or results.'
+                        }
+                    >
+                        <Select
+                            label={'Result type'}
+                            id="download-type"
+                            {...form.getInputProps('type')}
+                            onChange={(value) => {
+                                const tcType = Object.values(
+                                    TableCalculationType,
+                                ).find((type) => type === value);
+                                if (tcType) form.setFieldValue(`type`, tcType);
+                            }}
+                            data={Object.values(TableCalculationType)}
+                        ></Select>
+                    </Tooltip>
+                    <Group
+                        position="apart"
+                        pos="sticky"
+                        bottom={0}
+                        bg="white"
+                        style={{ zIndex: 1 }}
+                        mt="sm"
+                        p={theme.spacing.md}
+                        align="flex-end"
+                    >
                         <ActionIcon
                             variant="outline"
                             onClick={toggleFullscreen}
@@ -159,7 +280,13 @@ const TableCalculationModal: FC<Props> = ({
                             <Button variant="outline" onClick={onClose}>
                                 Cancel
                             </Button>
-                            <Button type="submit"> Save </Button>
+                            <Button
+                                type="submit"
+                                ref={submitButtonRef}
+                                data-testid="table-calculation-save-button"
+                            >
+                                Save
+                            </Button>
                         </Group>
                     </Group>
                 </Stack>

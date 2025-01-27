@@ -1,5 +1,5 @@
 import peg from 'pegjs';
-import { FilterOperator, MetricFilterRule } from './filter';
+import { FilterOperator, type MetricFilterRule } from './filter';
 import filterGrammar, { parseFilters } from './filterGrammar';
 
 describe('Parse grammar', () => {
@@ -257,7 +257,7 @@ describe('Parse metric filters', () => {
         ]);
     });
 
-    it('Should parse NULL using gtrammar', () => {
+    it('Should parse NULL using grammar', () => {
         const filters = [{ name: null }];
         expect(removeIds(parseFilters(filters))).toStrictEqual([
             {
@@ -270,7 +270,7 @@ describe('Parse metric filters', () => {
             },
         ]);
     });
-    it('Should parse NOT_NULL using gtrammar', () => {
+    it('Should parse NOT_NULL using grammar', () => {
         const filters = [{ name: '!null' }];
         expect(removeIds(parseFilters(filters))).toStrictEqual([
             {
@@ -280,6 +280,54 @@ describe('Parse metric filters', () => {
                     fieldRef: 'name',
                 },
                 values: [1],
+            },
+        ]);
+    });
+
+    it('Should parse multiple filter values using grammar', () => {
+        const filters = [{ name: ['cat', 'dog'] }];
+        expect(removeIds(parseFilters(filters))).toStrictEqual([
+            {
+                id: undefined,
+                operator: FilterOperator.EQUALS,
+                target: {
+                    fieldRef: 'name',
+                },
+                values: ['cat', 'dog'],
+            },
+        ]);
+    });
+
+    it('Should parse date in the past operator with interval', () => {
+        const filters = [{ name: 'inThePast 14 days' }];
+        expect(removeIds(parseFilters(filters))).toStrictEqual([
+            {
+                id: undefined,
+                operator: FilterOperator.IN_THE_PAST,
+                settings: {
+                    unitOfTime: 'days',
+                },
+                target: {
+                    fieldRef: 'name',
+                },
+                values: [14],
+            },
+        ]);
+    });
+
+    it('Should parse date in the next operator with interval', () => {
+        const filters = [{ name: 'inTheNext 14 years' }];
+        expect(removeIds(parseFilters(filters))).toStrictEqual([
+            {
+                id: undefined,
+                operator: FilterOperator.IN_THE_NEXT,
+                settings: {
+                    unitOfTime: 'years',
+                },
+                target: {
+                    fieldRef: 'name',
+                },
+                values: [14],
             },
         ]);
     });

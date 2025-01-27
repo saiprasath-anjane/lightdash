@@ -1,17 +1,17 @@
-import { ResultRow } from '@lightdash/common';
-import { Menu, MenuProps, Portal } from '@mantine/core';
-import { Cell } from '@tanstack/react-table';
-import { FC } from 'react';
+import { type ResultRow } from '@lightdash/common';
+import { Menu, Portal, type MenuProps } from '@mantine/core';
+import { type Cell } from '@tanstack/react-table';
+import { type FC } from 'react';
 import { usePreventScroll } from '../../../../hooks/useBlockScroll';
-import { CellContextMenuProps } from '../types';
+import { type CellContextMenuProps } from '../types';
 
 type CellMenuProps = MenuProps & {
-    menuItems: FC<CellContextMenuProps>;
+    menuItems: FC<React.PropsWithChildren<CellContextMenuProps>>;
     cell: Cell<ResultRow, ResultRow[0]>;
-    elementBounds: DOMRect;
+    elementBounds: DOMRect | null;
 };
 
-const CellMenu: FC<CellMenuProps> = ({
+const CellMenu: FC<React.PropsWithChildren<CellMenuProps>> = ({
     cell,
     elementBounds,
     menuItems: MenuItems,
@@ -42,10 +42,10 @@ const CellMenu: FC<CellMenuProps> = ({
                             pointerEvents: 'none',
                             position: 'absolute',
                             zIndex: -1,
-                            left: elementBounds.x,
-                            top: elementBounds.y,
-                            width: elementBounds.width,
-                            height: elementBounds.height,
+                            left: elementBounds?.x ?? 0 + window.scrollX,
+                            top: elementBounds?.y ?? 0 + window.scrollY,
+                            width: elementBounds?.width ?? 0,
+                            height: elementBounds?.height ?? 0,
                         }}
                     />
                 </Menu.Target>

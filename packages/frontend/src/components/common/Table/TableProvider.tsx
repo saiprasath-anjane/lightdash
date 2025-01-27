@@ -1,54 +1,20 @@
-import { ConditionalFormattingConfig, ResultRow } from '@lightdash/common';
 import {
-    ColumnOrderState,
     getCoreRowModel,
+    getExpandedRowModel,
     getPaginationRowModel,
-    Table,
     useReactTable,
+    type ColumnOrderState,
+    type GroupingState,
 } from '@tanstack/react-table';
-import React, {
-    createContext,
-    FC,
-    useContext,
-    useEffect,
-    useMemo,
-    useState,
-} from 'react';
+import React, { useEffect, useMemo, useState, type FC } from 'react';
 import {
-    CellContextMenuProps,
     DEFAULT_PAGE_SIZE,
-    HeaderProps,
     MAX_PAGE_SIZE,
     ROW_NUMBER_COLUMN_ID,
-    TableColumn,
-    TableHeader,
-} from './types';
-
-type Props = {
-    data: ResultRow[];
-    columns: Array<TableColumn | TableHeader>;
-    headerContextMenu?: FC<HeaderProps>;
-    cellContextMenu?: FC<CellContextMenuProps>;
-    pagination?: {
-        show?: boolean;
-        defaultScroll?: boolean;
-        showResultsTotal?: boolean;
-    };
-    hideRowNumbers?: boolean;
-    showColumnCalculation?: boolean;
-    conditionalFormattings?: ConditionalFormattingConfig[];
-    footer?: {
-        show?: boolean;
-    };
-    columnOrder?: string[];
-    onColumnOrderChange?: (value: string[]) => void;
-};
-
-export type TableContext = Props & {
-    table: Table<ResultRow>;
-};
-
-const Context = createContext<TableContext | undefined>(undefined);
+} from './constants';
+import Context from './context';
+import { getGroupedRowModelLightdash } from './getGroupedRowModelLightdash';
+import { type ProviderProps, type TableColumn } from './types';
 
 const rowColumn: TableColumn = {
     id: ROW_NUMBER_COLUMN_ID,
@@ -58,9 +24,10 @@ const rowColumn: TableColumn = {
     meta: {
         width: 30,
     },
+    enableGrouping: false,
 };
 
-const calculateColumnVisibility = (columns: Props['columns']) =>
+const calculateColumnVisibility = (columns: ProviderProps['columns']) =>
     columns.reduce(
         (acc, c) => ({
             ...acc,
@@ -72,13 +39,15 @@ const calculateColumnVisibility = (columns: Props['columns']) =>
         {},
     );
 
-export const TableProvider: FC<Props> = ({
+export const TableProvider: FC<React.PropsWithChildren<ProviderProps>> = ({
     hideRowNumbers,
     showColumnCalculation,
+    showSubtotals,
     children,
     ...rest
 }) => {
     const { data, columns, columnOrder, pagination } = rest;
+    const [grouping, setGrouping] = useState<GroupingState>([]);
     const [columnVisibility, setColumnVisibility] = useState({});
 
     useEffect(() => {
@@ -151,6 +120,7 @@ export const TableProvider: FC<Props> = ({
         data,
         columns: visibleColumns,
         state: {
+            grouping,
             columnVisibility,
             columnOrder: tempColumnOrder,
             columnPinning: {
@@ -165,6 +135,10 @@ export const TableProvider: FC<Props> = ({
         onColumnOrderChange: setTempColumnOrder,
         getCoreRowModel: getCoreRowModel(),
         getPaginationRowModel: getPaginationRowModel(),
+        onGroupingChange: setGrouping,
+        groupedColumnMode: false,
+        getExpandedRowModel: getExpandedRowModel(),
+        getGroupedRowModel: getGroupedRowModelLightdash(),
     });
 
     const { setPageSize } = table;
@@ -184,11 +158,3 @@ export const TableProvider: FC<Props> = ({
         </Context.Provider>
     );
 };
-
-export function useTableContext(): TableContext {
-    const context = useContext(Context);
-    if (context === undefined) {
-        throw new Error('useTableContext must be used within a TableProvider');
-    }
-    return context;
-}

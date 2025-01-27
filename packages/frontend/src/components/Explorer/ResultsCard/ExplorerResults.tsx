@@ -1,11 +1,11 @@
 import { getItemMap } from '@lightdash/common';
 import { Box, Text } from '@mantine/core';
-import { FC, memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type FC } from 'react';
 
 import { useColumns } from '../../../hooks/useColumns';
 import { useExplore } from '../../../hooks/useExplore';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
-import { TrackSection } from '../../../providers/TrackingProvider';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import Table from '../../common/Table';
 import { JsonViewerModal } from '../../JsonViewerModal';
@@ -42,9 +42,10 @@ export const ExplorerResults = memo(() => {
     const setColumnOrder = useExplorerContext(
         (context) => context.actions.setColumnOrder,
     );
-    const { isLoading, data: exploreData } = useExplore(activeTableName, {
-        refetchOnMount: false,
-    });
+    const { isInitialLoading, data: exploreData } = useExplore(
+        activeTableName,
+        { refetchOnMount: false },
+    );
     const tableCalculations = useExplorerContext(
         (context) =>
             context.state.unsavedChartVersion.metricQuery.tableCalculations,
@@ -56,13 +57,13 @@ export const ExplorerResults = memo(() => {
     const [isExpandModalOpened, setIsExpandModalOpened] = useState(false);
     const [expandData, setExpandData] = useState<{
         name: string;
-        jsonObject: object;
+        jsonObject: Record<string, unknown>;
     }>({
         name: 'unknown',
         jsonObject: {},
     });
 
-    const handleCellExpand = (name: string, data: object) => {
+    const handleCellExpand = (name: string, data: Record<string, unknown>) => {
         setExpandData({
             name: name,
             jsonObject: data,
@@ -82,7 +83,7 @@ export const ExplorerResults = memo(() => {
     }, [exploreData, additionalMetrics, tableCalculations]);
 
     const cellContextMenu = useCallback(
-        (props) => (
+        (props: any) => (
             <CellContextMenu
                 isEditMode={isEditMode}
                 {...props}
@@ -136,7 +137,7 @@ export const ExplorerResults = memo(() => {
 
     if (!activeTableName) return <NoTableSelected />;
 
-    if (isLoading) return <EmptyStateExploreLoading />;
+    if (isInitialLoading) return <EmptyStateExploreLoading />;
 
     if (columns.length === 0) return <EmptyStateNoColumns />;
     return (
@@ -155,6 +156,7 @@ export const ExplorerResults = memo(() => {
                     idleState={IdleState}
                     pagination={pagination}
                     footer={footer}
+                    showSubtotals={false}
                 />
                 <JsonViewerModal
                     heading={`Field: ${expandData.name}`}

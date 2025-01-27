@@ -1,15 +1,25 @@
 import {
+    FeatureFlags,
     getRoleDescription,
-    OrganizationMemberProfile,
+    isOrganizationMemberProfileWithGroups,
     OrganizationMemberRole,
+    type OrganizationMemberProfile,
+    type OrganizationMemberProfileWithGroups,
 } from '@lightdash/common';
 import {
+    ActionIcon,
     Anchor,
     Badge,
+    Box,
     Button,
+    Card,
     Flex,
     Group,
+    HoverCard,
+    List,
+    LoadingOverlay,
     Modal,
+    Pagination,
     Paper,
     Select,
     Stack,
@@ -19,6 +29,7 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
+import { useDebouncedValue } from '@mantine/hooks';
 import {
     IconAlertCircle,
     IconHelp,
@@ -27,119 +38,145 @@ import {
     IconX,
 } from '@tabler/icons-react';
 import capitalize from 'lodash/capitalize';
-import { FC, useState } from 'react';
+import { useEffect, useMemo, useState, type FC } from 'react';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
+import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import { useCreateInviteLinkMutation } from '../../../hooks/useInviteLink';
 import {
     useDeleteOrganizationUserMutation,
-    useOrganizationUsers,
+    usePaginatedOrganizationUsers,
     useUpdateUserMutation,
 } from '../../../hooks/useOrganizationUsers';
-import { useApp } from '../../../providers/AppProvider';
-import { useTracking } from '../../../providers/TrackingProvider';
+import useApp from '../../../providers/App/useApp';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
-import LoadingState from '../../common/LoadingState';
 import MantineIcon from '../../common/MantineIcon';
 import { SettingsCard } from '../../common/Settings/SettingsCard';
+import { DEFAULT_PAGE_SIZE } from '../../common/Table/constants';
 import InvitesModal from './InvitesModal';
 import InviteSuccess from './InviteSuccess';
 
+const UserNameDisplay: FC<{
+    user: OrganizationMemberProfile;
+    disabled?: boolean;
+    showInviteLink?: boolean;
+    hasEmail?: boolean;
+    onGetLink?: () => void;
+}> = ({ user, showInviteLink, hasEmail, onGetLink }) => {
+    return (
+        <Flex justify="space-between" align="center">
+            {!user.isActive ? (
+                <Stack spacing="xxs" align="flex-start">
+                    <Title order={6} color="gray.6">
+                        {user.firstName
+                            ? `${user.firstName} ${user.lastName}`
+                            : user.email}
+                    </Title>
+                    <Badge
+                        variant="filled"
+                        color="red.4"
+                        radius="xs"
+                        sx={{ textTransform: 'none' }}
+                        px="xxs"
+                    >
+                        <Text fz="xs" fw={400} color="gray.8">
+                            Inactive
+                        </Text>
+                    </Badge>
+                </Stack>
+            ) : user.isPending ? (
+                <Stack spacing="xxs" align="flex-start">
+                    {user.email && <Title order={6}>{user.email}</Title>}
+                    <Group spacing="xs">
+                        <Badge
+                            variant="filled"
+                            color="orange.3"
+                            radius="xs"
+                            sx={{ textTransform: 'none' }}
+                            px="xxs"
+                        >
+                            <Text fz="xs" fw={400} color="gray.8">
+                                {!user.isInviteExpired
+                                    ? 'Pending'
+                                    : 'Link expired'}
+                            </Text>
+                        </Badge>
+                        {showInviteLink && (
+                            <Anchor
+                                component="button"
+                                onClick={onGetLink}
+                                size="xs"
+                                fw={500}
+                            >
+                                {hasEmail ? 'Send new invite' : 'Get new link'}
+                            </Anchor>
+                        )}
+                    </Group>
+                </Stack>
+            ) : (
+                <Stack spacing="xxs" align="flex-start">
+                    <Title order={6}>
+                        {user.firstName} {user.lastName}
+                    </Title>
+
+                    {user.email && (
+                        <Badge
+                            variant="filled"
+                            color="gray.2"
+                            radius="xs"
+                            sx={{ textTransform: 'none' }}
+                            px="xxs"
+                        >
+                            <Text fz="xs" fw={400} color="gray.8">
+                                {user.email}
+                            </Text>
+                        </Badge>
+                    )}
+                </Stack>
+            )}
+        </Flex>
+    );
+};
+
 const UserListItem: FC<{
     disabled: boolean;
-    user: OrganizationMemberProfile;
-}> = ({
-    disabled,
-    user: {
-        userUuid,
-        firstName,
-        lastName,
-        email,
-        role,
-        isActive,
-        isInviteExpired,
-    },
-}) => {
+    user: OrganizationMemberProfile | OrganizationMemberProfileWithGroups;
+    isGroupManagementEnabled?: boolean;
+}> = ({ disabled, user, isGroupManagementEnabled }) => {
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [showInviteSuccess, setShowInviteSuccess] = useState(true);
     const { mutate, isLoading: isDeleting } =
         useDeleteOrganizationUserMutation();
     const inviteLink = useCreateInviteLinkMutation();
     const { track } = useTracking();
-    const { user, health } = useApp();
-    const updateUser = useUpdateUserMutation(userUuid);
-    const handleDelete = () => mutate(userUuid);
+    const { user: activeUser, health } = useApp();
+    const updateUser = useUpdateUserMutation(user.userUuid);
+    const handleDelete = () => mutate(user.userUuid);
 
     const getNewLink = () => {
         track({
             name: EventName.INVITE_BUTTON_CLICKED,
         });
-        inviteLink.mutate({ email, role });
+        inviteLink.mutate({ email: user.email, role: user.role });
         setShowInviteSuccess(true);
     };
 
     return (
         <>
             <tr>
-                <td width={500}>
-                    <Flex justify="space-between" align="center">
-                        {isActive ? (
-                            <Stack spacing="xxs">
-                                <Title order={6}>
-                                    {firstName} {lastName}
-                                </Title>
-
-                                {email && (
-                                    <Badge
-                                        variant="filled"
-                                        color="gray.2"
-                                        radius="xs"
-                                        sx={{ textTransform: 'none' }}
-                                        px="xxs"
-                                    >
-                                        <Text fz="xs" fw={400} color="gray.8">
-                                            {email}
-                                        </Text>
-                                    </Badge>
-                                )}
-                            </Stack>
-                        ) : (
-                            <Stack spacing="xxs">
-                                {email && <Title order={6}>{email}</Title>}
-                                <Group spacing="xs">
-                                    <Badge
-                                        variant="filled"
-                                        color="orange.3"
-                                        radius="xs"
-                                        sx={{ textTransform: 'none' }}
-                                        px="xxs"
-                                    >
-                                        <Text fz="xs" fw={400} color="gray.8">
-                                            {!isInviteExpired
-                                                ? 'Pending'
-                                                : 'Link expired'}
-                                        </Text>
-                                    </Badge>
-                                    {user.data?.ability?.can(
-                                        'create',
-                                        'InviteLink',
-                                    ) && (
-                                        <Anchor
-                                            component="button"
-                                            onClick={getNewLink}
-                                            size="xs"
-                                            fw={500}
-                                        >
-                                            {health.data?.hasEmailClient
-                                                ? 'Send new invite'
-                                                : 'Get new link'}
-                                        </Anchor>
-                                    )}
-                                </Group>
-                            </Stack>
+                <td width={300}>
+                    <UserNameDisplay
+                        disabled={disabled}
+                        user={user}
+                        showInviteLink={activeUser.data?.ability?.can(
+                            'create',
+                            'InviteLink',
                         )}
-                    </Flex>
+                        onGetLink={getNewLink}
+                        hasEmail={health.data?.hasEmailClient}
+                    />
                 </td>
-                {user.data?.ability?.can(
+                {activeUser.data?.ability?.can(
                     'manage',
                     'OrganizationMemberProfile',
                 ) && (
@@ -161,7 +198,7 @@ const UserListItem: FC<{
                                         role: newRole as OrganizationMemberRole,
                                     });
                                 }}
-                                value={role}
+                                value={user.role}
                                 w={200}
                                 itemComponent={({
                                     label,
@@ -186,6 +223,49 @@ const UserListItem: FC<{
                                 )}
                             />
                         </td>
+                        {isGroupManagementEnabled && (
+                            <td>
+                                {isOrganizationMemberProfileWithGroups(
+                                    user,
+                                ) && (
+                                    <HoverCard
+                                        shadow="sm"
+                                        disabled={user.groups.length < 1}
+                                    >
+                                        <HoverCard.Target>
+                                            <Text color="gray">{`${
+                                                user.groups.length
+                                            } group${
+                                                user.groups.length !== 1
+                                                    ? 's'
+                                                    : ''
+                                            }`}</Text>
+                                        </HoverCard.Target>
+                                        <HoverCard.Dropdown p="sm">
+                                            <Text
+                                                fz="xs"
+                                                fw={600}
+                                                color="gray.6"
+                                            >
+                                                User groups:
+                                            </Text>
+                                            <List
+                                                size="xs"
+                                                ml="xs"
+                                                mt="xs"
+                                                fz="xs"
+                                            >
+                                                {user.groups.map((group) => (
+                                                    <List.Item key={group.name}>
+                                                        {group.name}
+                                                    </List.Item>
+                                                ))}
+                                            </List>
+                                        </HoverCard.Dropdown>
+                                    </HoverCard>
+                                )}
+                            </td>
+                        )}
                         <td>
                             <Group position="right">
                                 <Button
@@ -217,9 +297,12 @@ const UserListItem: FC<{
                                 }
                             >
                                 <Text pb="md">
-                                    Are you sure you want to delete this user ?
+                                    Are you sure you want to delete this user?
                                 </Text>
-                                <Group spacing="xs" position="right">
+                                <Card withBorder>
+                                    <UserNameDisplay user={user} />
+                                </Card>
+                                <Group spacing="xs" position="right" mt="md">
                                     <Button
                                         disabled={isDeleting}
                                         onClick={() =>
@@ -264,48 +347,74 @@ const UserListItem: FC<{
 const UsersView: FC = () => {
     const [showInviteModal, setShowInviteModal] = useState(false);
     const { user } = useApp();
+    const { data: UserGroupsFeatureFlag } = useFeatureFlag(
+        FeatureFlags.UserGroupsEnabled,
+    );
     const { classes } = useTableStyles();
-
+    const [page, setPage] = useState(1);
     const [search, setSearch] = useState('');
+    const [debouncedSearchQueryAndPage] = useDebouncedValue(
+        { search, page },
+        300,
+    );
 
-    const { data: organizationUsers, isLoading: isLoadingUsers } =
-        useOrganizationUsers(search);
+    // TODO: fix the hardcoded groups number. This should be paginated.
+    const { data: paginatedUsers, isInitialLoading: isLoadingUsers } =
+        usePaginatedOrganizationUsers({
+            searchInput: debouncedSearchQueryAndPage.search,
+            includeGroups: 10000,
+            paginateArgs: {
+                page: debouncedSearchQueryAndPage.page,
+                pageSize: DEFAULT_PAGE_SIZE,
+            },
+        });
 
-    if (isLoadingUsers) {
-        return <LoadingState title="Loading users" />;
-    }
+    useEffect(() => {
+        setPage(1);
+    }, [search]);
+
+    const organizationUsers = useMemo(() => {
+        return paginatedUsers?.data;
+    }, [paginatedUsers]);
+
+    const pagination = useMemo(() => {
+        return paginatedUsers?.pagination;
+    }, [paginatedUsers]);
+
+    if (!user.data || !UserGroupsFeatureFlag) return null;
+
+    const isGroupManagementEnabled = UserGroupsFeatureFlag?.enabled;
 
     return (
         <Stack spacing="xs">
-            {user.data?.ability?.can('create', 'InviteLink') && (
-                <Button
-                    compact
-                    leftIcon={<MantineIcon icon={IconPlus} />}
-                    onClick={() => setShowInviteModal(true)}
-                    sx={{ alignSelf: 'end' }}
-                >
-                    Add user
-                </Button>
-            )}
             <SettingsCard shadow="none" p={0}>
-                <Paper p="sm">
-                    <TextInput
-                        size="xs"
-                        placeholder="Search users by name, email, or role"
-                        onChange={(e) => setSearch(e.target.value)}
-                        value={search}
-                        w={320}
-                        rightSection={
-                            search.length > 0 && (
-                                <MantineIcon
-                                    color="gray.6"
-                                    icon={IconX}
-                                    onClick={() => setSearch('')}
-                                    style={{ cursor: 'pointer' }}
-                                />
-                            )
-                        }
-                    />
+                <Paper p="sm" radius={0}>
+                    <Group align="center" position="apart">
+                        <TextInput
+                            size="xs"
+                            data-testid="org-users-search-input"
+                            placeholder="Search users by name, email, or role"
+                            onChange={(e) => setSearch(e.target.value)}
+                            value={search}
+                            w={320}
+                            rightSection={
+                                search.length > 0 && (
+                                    <ActionIcon onClick={() => setSearch('')}>
+                                        <MantineIcon icon={IconX} />
+                                    </ActionIcon>
+                                )
+                            }
+                        />
+                        {user.data?.ability?.can('create', 'InviteLink') && (
+                            <Button
+                                compact
+                                leftIcon={<MantineIcon icon={IconPlus} />}
+                                onClick={() => setShowInviteModal(true)}
+                            >
+                                Add user
+                            </Button>
+                        )}
+                    </Group>
                 </Paper>
                 <Table className={classes.root}>
                     <thead>
@@ -317,24 +426,43 @@ const UsersView: FC = () => {
                             ) && (
                                 <>
                                     <th>Role</th>
+                                    {isGroupManagementEnabled && (
+                                        <th>Groups</th>
+                                    )}
                                     <th></th>
                                 </>
                             )}
                         </tr>
                     </thead>
-                    <tbody>
-                        {organizationUsers && organizationUsers.length ? (
+                    <tbody style={{ position: 'relative' }}>
+                        {!isLoadingUsers &&
+                        organizationUsers &&
+                        organizationUsers.length ? (
                             organizationUsers.map((orgUser) => (
                                 <UserListItem
                                     key={orgUser.email}
                                     user={orgUser}
+                                    isGroupManagementEnabled={
+                                        isGroupManagementEnabled
+                                    }
                                     disabled={
                                         user.data?.userUuid ===
                                             orgUser.userUuid ||
-                                        organizationUsers.length <= 1
+                                        organizationUsers.length < 1
                                     }
                                 />
                             ))
+                        ) : isLoadingUsers ? (
+                            <tr>
+                                <td colSpan={3}>
+                                    <Box py="lg">
+                                        <LoadingOverlay
+                                            visible={true}
+                                            transitionDuration={200}
+                                        />
+                                    </Box>
+                                </td>
+                            </tr>
                         ) : (
                             <tr>
                                 <td colSpan={3}>
@@ -346,6 +474,17 @@ const UsersView: FC = () => {
                         )}
                     </tbody>
                 </Table>
+                {pagination?.totalPageCount && pagination.totalPageCount > 1 ? (
+                    <Flex m="sm" align="center" justify="center">
+                        <Pagination
+                            size="sm"
+                            value={page}
+                            onChange={setPage}
+                            total={pagination?.totalPageCount}
+                            mt="sm"
+                        />
+                    </Flex>
+                ) : null}
             </SettingsCard>
             <InvitesModal
                 key={`invite-modal-${showInviteModal}`}

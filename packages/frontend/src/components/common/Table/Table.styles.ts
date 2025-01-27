@@ -1,5 +1,6 @@
 import { DEFAULT_THEME } from '@mantine/core';
 import { transparentize } from 'polished';
+import { type ReactNode } from 'react';
 import styled, { css } from 'styled-components';
 
 // FIXME: these colors are coming from the mantine's default theme.
@@ -23,11 +24,17 @@ interface TableContainerProps {
     $padding?: number;
 }
 
-export const TableContainer = styled.div<TableContainerProps>`
+export const TableContainer = styled.div<
+    TableContainerProps & { children: ReactNode }
+>`
     display: flex;
     flex-direction: column;
     min-width: 100%;
     overflow: hidden;
+
+    font-family: 'Inter', sans-serif;
+    font-feature-settings: 'tnum';
+
     padding: ${({ $padding = 0 }) => `${$padding}px`};
 
     ${({ $shouldExpand }) =>
@@ -40,7 +47,7 @@ export const TableContainer = styled.div<TableContainerProps>`
             `}
 `;
 
-export const Table = styled.table<{ $showFooter: boolean }>`
+export const Table = styled.table<{ $showFooter?: boolean }>`
     border-spacing: 0;
     font-size: 14px;
     background-color: white;
@@ -133,6 +140,10 @@ export const Table = styled.table<{ $showFooter: boolean }>`
         z-index: 1;
         background-color: white !important;
         word-break: break-word;
+        :hover {
+            white-space: normal;
+            background-color: white;
+        }
     }
     .last-sticky-column {
         border-right: 2px solid darkgray;
@@ -149,7 +160,6 @@ export const TableFooter = styled.div`
 
 const FontSyles = `
     font-size: 13px;
-    font-family: Inter, sans-serif;
 `;
 
 const CellStyles = css<{ $isNaN: boolean }>`

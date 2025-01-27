@@ -1,18 +1,25 @@
+import { type AnyType } from './any';
 import {
     BinType,
-    CompactOrAlias,
-    CompiledDimension,
-    CompiledMetric,
-    CompiledTableCalculation,
-    CustomDimension,
-    FieldId,
-    Format,
     friendlyName,
-    MetricType,
-    TableCalculation,
+    isCustomBinDimension,
+    isCustomDimension,
+    isCustomSqlDimension,
+    type CompactOrAlias,
+    type CompiledCustomDimension,
+    type CompiledDimension,
+    type CompiledMetric,
+    type CompiledTableCalculation,
+    type CustomDimension,
+    type CustomFormat,
+    type FieldId,
+    type Format,
+    type Metric,
+    type MetricType,
+    type TableCalculation,
 } from './field';
-import { Filters, MetricFilterRule } from './filter';
-import { DateGranularity } from './timeFrames';
+import { type Filters, type MetricFilterRule } from './filter';
+import { type DateGranularity } from './timeFrames';
 
 export interface AdditionalMetric {
     label?: string;
@@ -30,19 +37,23 @@ export interface AdditionalMetric {
     baseDimensionName?: string;
     uuid?: string | null;
     percentile?: number;
+    formatOptions?: CustomFormat;
 }
 
-export const getCustomDimensionId = (dimension: CustomDimension) =>
-    dimension.id;
+export const isAdditionalMetric = (value: AnyType): value is AdditionalMetric =>
+    value?.table &&
+    value?.name &&
+    !value?.fieldType &&
+    !isCustomDimension(value);
 
-export const isAdditionalMetric = (value: any): value is AdditionalMetric =>
-    value?.table && value?.name && !value?.fieldType && !value.binType;
+export const hasFormatOptions = (
+    value: AnyType,
+): value is { formatOptions: CustomFormat } => !!value.formatOptions;
 
 export const getCustomMetricDimensionId = (metric: AdditionalMetric) =>
     `${metric.table}_${metric.baseDimensionName}`;
 
-export const isCustomDimension = (value: any): value is CustomDimension =>
-    value !== undefined && 'binType' in value;
+export type MetricOverrides = { [key: string]: Pick<Metric, 'formatOptions'> }; // Don't use Record to avoid issues in TSOA
 
 // Object used to query an explore. Queries only happen within a single explore
 export type MetricQuery = {
@@ -55,35 +66,21 @@ export type MetricQuery = {
     tableCalculations: TableCalculation[]; // calculations to append to results
     additionalMetrics?: AdditionalMetric[]; // existing metric type
     customDimensions?: CustomDimension[];
+    metricOverrides?: MetricOverrides; // Override format options for fields in "metrics"
+    timezone?: string; // Local timezone to use for the query
     metadata?: {
         hasADateDimension: Pick<CompiledDimension, 'label' | 'name'>;
     };
 };
-export type CompiledMetricQuery = MetricQuery & {
+export type CompiledMetricQuery = Omit<MetricQuery, 'customDimensions'> & {
     compiledTableCalculations: CompiledTableCalculation[];
     compiledAdditionalMetrics: CompiledMetric[];
+    compiledCustomDimensions: CompiledCustomDimension[];
 };
 // Sort by
 export type SortField = {
     fieldId: string; // Field must exist in the explore
     descending: boolean; // Direction of the sort
-};
-
-const idPattern = /(.+)id$/i;
-export const extractEntityNameFromIdColumn = (
-    columnName: string,
-): string | null => {
-    const match = columnName.match(idPattern);
-    if (!match || columnName.toLowerCase().endsWith('valid')) {
-        return null;
-    }
-    return (
-        match[1]
-            .toLowerCase()
-            .split(/[^a-z]/)
-            .filter((x) => x)
-            .join('_') || null
-    );
 };
 
 export const getAdditionalMetricLabel = (item: AdditionalMetric) =>
@@ -92,11 +89,11 @@ export const getAdditionalMetricLabel = (item: AdditionalMetric) =>
 type FilterGroupResponse =
     | {
           id: string;
-          or: any[];
+          or: AnyType[];
       }
     | {
           id: string;
-          and: any[];
+          and: AnyType[];
       };
 export type FiltersResponse = {
     dimensions?: FilterGroupResponse;
@@ -123,13 +120,26 @@ export const countCustomDimensionsInMetricQuery = (
 ) => ({
     numFixedWidthBinCustomDimensions:
         metricQuery.customDimensions?.filter(
-            (dimension) => dimension.binType === BinType.FIXED_NUMBER,
+            (dimension) =>
+                isCustomBinDimension(dimension) &&
+                dimension.binType === BinType.FIXED_NUMBER,
         ).length || 0,
     numFixedBinsBinCustomDimensions:
         metricQuery.customDimensions?.filter(
-            (dimension) => dimension.binType === BinType.FIXED_WIDTH,
+            (dimension) =>
+                isCustomBinDimension(dimension) &&
+                dimension.binType === BinType.FIXED_WIDTH,
         ).length || 0,
-    numCustomRangeBinCustomDimensions: 0, // TODO complete when custom range bin is implemented
+    numCustomRangeBinCustomDimensions:
+        metricQuery.customDimensions?.filter(
+            (dimension) =>
+                isCustomBinDimension(dimension) &&
+                dimension.binType === BinType.CUSTOM_RANGE,
+        ).length || 0,
+    numCustomSqlDimensions:
+        metricQuery.customDimensions?.filter((dimension) =>
+            isCustomSqlDimension(dimension),
+        ).length || 0,
 });
 
 export const hasCustomDimension = (metricQuery: MetricQuery | undefined) =>
@@ -141,9 +151,9 @@ export type MetricQueryRequest = {
     dimensions: FieldId[]; // Dimensions to group by in the explore
     metrics: FieldId[]; // Metrics to compute in the explore
     filters: {
-        dimensions?: any;
-        metrics?: any;
-        tableCalculations?: any;
+        dimensions?: AnyType;
+        metrics?: AnyType;
+        tableCalculations?: AnyType;
     };
     sorts: SortField[]; // Sorts for the data
     limit: number; // Max number of rows to return from query
@@ -153,4 +163,6 @@ export type MetricQueryRequest = {
     customDimensions?: CustomDimension[];
     granularity?: DateGranularity;
     metadata?: MetricQuery['metadata'];
+    timezone?: string;
+    metricOverrides?: MetricOverrides;
 };

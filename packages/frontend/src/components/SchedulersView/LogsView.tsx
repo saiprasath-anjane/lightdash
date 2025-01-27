@@ -1,4 +1,4 @@
-import { SchedulerWithLogs } from '@lightdash/common';
+import { type SchedulerWithLogs } from '@lightdash/common';
 import {
     ActionIcon,
     Anchor,
@@ -13,8 +13,8 @@ import {
 import { IconChevronDown } from '@tabler/icons-react';
 import capitalize from 'lodash/capitalize';
 import groupBy from 'lodash/groupBy';
-import { FC, useCallback, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useMemo, useState, type FC } from 'react';
+import { Link } from 'react-router';
 import { useTableStyles } from '../../hooks/styles/useTableStyles';
 import MantineIcon from '../common/MantineIcon';
 import {
@@ -22,9 +22,9 @@ import {
     getLogStatusIcon,
     getSchedulerIcon,
     getSchedulerLink,
-    Log,
-    SchedulerColumnName,
-    SchedulerItem,
+    type Log,
+    type SchedulerColumnName,
+    type SchedulerItem,
 } from './SchedulersViewUtils';
 
 type Column = {

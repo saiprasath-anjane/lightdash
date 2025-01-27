@@ -1,12 +1,15 @@
-import { ApiError, OrganizationProject, ProjectType } from '@lightdash/common';
+import {
+    ProjectType,
+    type ApiError,
+    type OrganizationProject,
+} from '@lightdash/common';
 import {
     useMutation,
     useQuery,
     useQueryClient,
-    UseQueryOptions,
-} from 'react-query';
+    type UseQueryOptions,
+} from '@tanstack/react-query';
 import { lightdashApi } from '../api';
-import { UseQueryFetchOptions } from '../types/UseQuery';
 import { useOrganization } from './organization/useOrganization';
 import useToaster from './toaster/useToaster';
 
@@ -27,16 +30,16 @@ export const useProjects = (
     });
 };
 
-export const useDefaultProject = (
-    useQueryFetchOptions?: UseQueryFetchOptions,
-): {
+export const useDefaultProject = (useQueryOptions?: {
+    refetchOnMount: boolean;
+}): {
     isLoading: boolean;
     data: OrganizationProject | undefined;
 } => {
-    const { isLoading: isOrganizationLoading, data: org } =
-        useOrganization(useQueryFetchOptions);
-    const { isLoading: isLoadingProjects, data: projects = [] } =
-        useProjects(useQueryFetchOptions);
+    const { isInitialLoading: isOrganizationLoading, data: org } =
+        useOrganization(useQueryOptions);
+    const { isInitialLoading: isLoadingProjects, data: projects = [] } =
+        useProjects(useQueryOptions);
 
     const defaultProject = projects?.find(
         (project) => project.projectUuid === org?.defaultProjectUuid,
@@ -53,7 +56,7 @@ export const useDefaultProject = (
 };
 
 const deleteProjectQuery = async (id: string) =>
-    lightdashApi<undefined>({
+    lightdashApi<null>({
         url: `/org/projects/${id}`,
         method: 'DELETE',
         body: undefined,
@@ -61,19 +64,19 @@ const deleteProjectQuery = async (id: string) =>
 
 export const useDeleteProjectMutation = () => {
     const queryClient = useQueryClient();
-    const { showToastSuccess, showToastError } = useToaster();
-    return useMutation<undefined, ApiError, string>(deleteProjectQuery, {
+    const { showToastSuccess, showToastApiError } = useToaster();
+    return useMutation<null, ApiError, string>(deleteProjectQuery, {
         mutationKey: ['organization_project_delete'],
         onSuccess: async () => {
-            await queryClient.invalidateQueries('projects');
+            await queryClient.invalidateQueries(['projects']);
             showToastSuccess({
                 title: `Deleted! Project was deleted.`,
             });
         },
-        onError: (error) => {
-            showToastError({
+        onError: ({ error }) => {
+            showToastApiError({
                 title: `Failed to delete project`,
-                subtitle: error.error.message,
+                apiError: error,
             });
         },
     });

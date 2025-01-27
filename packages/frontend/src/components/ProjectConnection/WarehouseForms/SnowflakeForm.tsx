@@ -1,4 +1,4 @@
-import { WarehouseTypes } from '@lightdash/common';
+import { FeatureFlags, WarehouseTypes } from '@lightdash/common';
 import {
     Anchor,
     Group,
@@ -7,17 +7,20 @@ import {
     Switch,
     TextInput,
 } from '@mantine/core';
-import React, { FC } from 'react';
+
+import React, { type FC } from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 import { useToggle } from 'react-use';
+import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
 import {
     hasNoWhiteSpaces,
     isUppercase,
     startWithHTTPSProtocol,
 } from '../../../utils/fieldValidators';
+import BooleanSwitch from '../../ReactHookForm/BooleanSwitch';
 import FormSection from '../../ReactHookForm/FormSection';
 import FormCollapseButton from '../FormCollapseButton';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 import StartOfWeekSelect from './Inputs/StartOfWeekSelect';
 
 export const SnowflakeSchemaInput: FC<{
@@ -48,6 +51,9 @@ const SnowflakeForm: FC<{
 
     const requireSecrets: boolean =
         savedProject?.warehouseConnection?.type !== WarehouseTypes.SNOWFLAKE;
+    const isPassthroughLoginFeatureEnabled = useFeatureFlagEnabled(
+        FeatureFlags.PassthroughLogin,
+    );
     return (
         <>
             <Stack style={{ marginTop: '8px' }}>
@@ -125,9 +131,22 @@ const SnowflakeForm: FC<{
                     })}
                     disabled={disabled}
                 />
-
+                <BooleanSwitch
+                    name="warehouse.override"
+                    documentationUrl="https://docs.lightdash.com/get-started/setup-lightdash/connect-project#warehouse"
+                    label="Always use this warehouse"
+                    disabled={disabled}
+                />
                 <FormSection isOpen={isOpen} name="advanced">
                     <Stack style={{ marginTop: '8px' }}>
+                        {isPassthroughLoginFeatureEnabled && (
+                            <BooleanSwitch
+                                name="warehouse.requireUserCredentials"
+                                label="Require users to provide their own credentials"
+                                defaultValue={false}
+                                disabled={disabled}
+                            />
+                        )}
                         <Controller
                             name="warehouse.clientSessionKeepAlive"
                             render={({ field }) => (
@@ -210,7 +229,10 @@ const SnowflakeForm: FC<{
                                 },
                             })}
                         />
-                        <StartOfWeekSelect disabled={disabled} />
+                        <StartOfWeekSelect
+                            disabled={disabled}
+                            isRedeployRequired={false}
+                        />
                     </Stack>
                 </FormSection>
                 <FormCollapseButton isSectionOpen={isOpen} onClick={toggleOpen}>

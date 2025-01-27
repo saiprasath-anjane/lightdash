@@ -1,24 +1,26 @@
 import {
-    DashboardFieldTarget,
-    DashboardFilterRule,
-    FilterOperator,
+    type DashboardFieldTarget,
+    type DashboardFilterRule,
+    type FilterableDimension,
+    type FilterOperator,
 } from '@lightdash/common';
 import { Flex } from '@mantine/core';
-import { FC, useCallback, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import { useProject } from '../../hooks/useProject';
-import { useDashboardContext } from '../../providers/DashboardProvider';
-import { useTracking } from '../../providers/TrackingProvider';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
+import useTracking from '../../providers/Tracking/useTracking';
 import { EventName } from '../../types/Events';
-import { FiltersProvider } from '../common/Filters/FiltersProvider';
+import FiltersProvider from '../common/Filters/FiltersProvider';
 import ActiveFilters from './ActiveFilters';
 import Filter from './Filter';
 
 interface Props {
     isEditMode: boolean;
+    activeTabUuid: string | undefined;
 }
 
-const DashboardFilter: FC<Props> = ({ isEditMode }) => {
+const DashboardFilter: FC<Props> = ({ isEditMode, activeTabUuid }) => {
     const { track } = useTracking();
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const [openPopoverId, setPopoverId] = useState<string>();
@@ -26,8 +28,8 @@ const DashboardFilter: FC<Props> = ({ isEditMode }) => {
     const project = useProject(projectUuid);
 
     const allFilters = useDashboardContext((c) => c.allFilters);
-    const fieldsWithSuggestions = useDashboardContext(
-        (c) => c.fieldsWithSuggestions,
+    const allFilterableFieldsMap = useDashboardContext(
+        (c) => c.allFilterableFieldsMap,
     );
     const addDimensionDashboardFilter = useDashboardContext(
         (c) => c.addDimensionDashboardFilter,
@@ -65,10 +67,9 @@ const DashboardFilter: FC<Props> = ({ isEditMode }) => {
     if (!hasChartTiles) return null;
 
     return (
-        // TODO is this provider necessary?
-        <FiltersProvider
+        <FiltersProvider<Record<string, FilterableDimension>>
             projectUuid={projectUuid}
-            fieldsMap={fieldsWithSuggestions}
+            itemsMap={allFilterableFieldsMap}
             startOfWeek={
                 project.data?.warehouseConnection?.startOfWeek ?? undefined
             }
@@ -79,6 +80,7 @@ const DashboardFilter: FC<Props> = ({ isEditMode }) => {
                     isCreatingNew
                     isEditMode={isEditMode}
                     openPopoverId={openPopoverId}
+                    activeTabUuid={activeTabUuid}
                     onPopoverOpen={handlePopoverOpen}
                     onPopoverClose={handlePopoverClose}
                     onSave={handleSaveNew}
@@ -86,6 +88,7 @@ const DashboardFilter: FC<Props> = ({ isEditMode }) => {
 
                 <ActiveFilters
                     isEditMode={isEditMode}
+                    activeTabUuid={activeTabUuid}
                     openPopoverId={openPopoverId}
                     onPopoverOpen={handlePopoverOpen}
                     onPopoverClose={handlePopoverClose}

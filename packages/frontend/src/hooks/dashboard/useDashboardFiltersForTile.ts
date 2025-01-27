@@ -1,9 +1,9 @@
 import {
-    DashboardFilters,
     getDashboardFilterRulesForTile,
+    type DashboardFilters,
 } from '@lightdash/common';
 import { useMemo } from 'react';
-import { useDashboardContext } from '../../providers/DashboardProvider';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 
 const useDashboardFiltersForTile = (tileUuid: string): DashboardFilters => {
     const dashboardFilters = useDashboardContext((c) => c.dashboardFilters);

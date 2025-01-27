@@ -1,24 +1,28 @@
 import {
-    ApiError,
-    CreateSchedulerAndTargets,
-    CreateSchedulerAndTargetsWithoutIds,
-    SchedulerAndTargets,
-    UpdateSchedulerAndTargetsWithoutId,
+    type ApiError,
+    type CreateSchedulerAndTargets,
+    type CreateSchedulerAndTargetsWithoutIds,
+    type ItemsMap,
+    type SchedulerAndTargets,
+    type UpdateSchedulerAndTargetsWithoutId,
 } from '@lightdash/common';
 import { Box, Loader, LoadingOverlay, Stack, Text } from '@mantine/core';
-import { FC, useCallback, useEffect, useState } from 'react';
 import {
-    UseMutationResult,
-    UseQueryResult,
-} from 'react-query/types/react/types';
-import { useHistory, useLocation } from 'react-router-dom';
+    type UseMutationResult,
+    type UseQueryResult,
+} from '@tanstack/react-query';
+import { useCallback, useEffect, useState, type FC } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import ErrorState from '../../../components/common/ErrorState';
 import useUser from '../../../hooks/user/useUser';
-import { useTracking } from '../../../providers/TrackingProvider';
+import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import { useScheduler, useSendNowScheduler } from '../hooks/useScheduler';
 import { useSchedulersUpdateMutation } from '../hooks/useSchedulersUpdateMutation';
-import { getSchedulerUuidFromUrlParams } from '../utils';
+import {
+    getSchedulerUuidFromUrlParams,
+    getThresholdUuidFromUrlParams,
+} from '../utils';
 import SchedulerForm from './SchedulerForm';
 import SchedulersModalFooter from './SchedulerModalFooter';
 import SchedulersList from './SchedulersList';
@@ -31,10 +35,17 @@ enum States {
 
 const ListStateContent: FC<{
     schedulersQuery: UseQueryResult<SchedulerAndTargets[], ApiError>;
+    isThresholdAlertList?: boolean;
     onClose: () => void;
     onConfirm: () => void;
     onEdit: (schedulerUuid: string) => void;
-}> = ({ schedulersQuery, onClose, onConfirm, onEdit }) => {
+}> = ({
+    schedulersQuery,
+    isThresholdAlertList,
+    onClose,
+    onConfirm,
+    onEdit,
+}) => {
     return (
         <>
             <Box
@@ -45,6 +56,7 @@ const ListStateContent: FC<{
             >
                 <SchedulersList
                     schedulersQuery={schedulersQuery}
+                    isThresholdAlertList={isThresholdAlertList}
                     onEdit={onEdit}
                 />
             </Box>
@@ -65,8 +77,17 @@ const CreateStateContent: FC<{
         { resourceUuid: string; data: CreateSchedulerAndTargetsWithoutIds }
     >;
     isChart: boolean;
+    isThresholdAlert?: boolean;
+    itemsMap?: ItemsMap;
     onBack: () => void;
-}> = ({ resourceUuid, createMutation, isChart, onBack }) => {
+}> = ({
+    resourceUuid,
+    createMutation,
+    isChart,
+    isThresholdAlert,
+    itemsMap,
+    onBack,
+}) => {
     useEffect(() => {
         if (createMutation.isSuccess) {
             createMutation.reset();
@@ -124,10 +145,14 @@ const CreateStateContent: FC<{
                           }
                 }
                 onSubmit={handleSubmit}
-                confirmText="Create schedule"
+                confirmText={
+                    isThresholdAlert ? 'Create alert' : 'Create schedule'
+                }
                 onBack={onBack}
                 onSendNow={handleSendNow}
                 loading={createMutation.isLoading}
+                isThresholdAlert={isThresholdAlert}
+                itemsMap={itemsMap}
             />
         </>
     );
@@ -135,8 +160,10 @@ const CreateStateContent: FC<{
 
 const UpdateStateContent: FC<{
     schedulerUuid: string;
+    itemsMap?: ItemsMap;
     onBack: () => void;
-}> = ({ schedulerUuid, onBack }) => {
+    isThresholdAlert?: boolean;
+}> = ({ schedulerUuid, itemsMap, onBack, isThresholdAlert }) => {
     const scheduler = useScheduler(schedulerUuid);
 
     const mutation = useSchedulersUpdateMutation(schedulerUuid);
@@ -176,18 +203,18 @@ const UpdateStateContent: FC<{
         [scheduler.data, user?.userUuid, track, sendNow],
     );
 
-    if (scheduler.isLoading || scheduler.error) {
+    if (scheduler.isInitialLoading || scheduler.error) {
         return (
             <>
                 <Box m="xl">
-                    {scheduler.isLoading ? (
+                    {scheduler.isInitialLoading ? (
                         <Stack h={300} w="100%" align="center">
                             <Text fw={600}>Loading scheduler</Text>
                             <Loader size="lg" />
                         </Stack>
-                    ) : (
+                    ) : scheduler.error ? (
                         <ErrorState error={scheduler.error.error} />
-                    )}
+                    ) : null}
                 </Box>
                 <SchedulersModalFooter onBack={onBack} />
             </>
@@ -213,11 +240,13 @@ const UpdateStateContent: FC<{
                 }
                 disabled={mutation.isLoading}
                 savedSchedulerData={scheduler.data}
+                isThresholdAlert={isThresholdAlert}
                 onSubmit={handleSubmit}
                 confirmText="Save"
                 onBack={onBack}
                 onSendNow={handleSendNow}
-                loading={mutation.isLoading || scheduler.isLoading}
+                loading={mutation.isLoading || scheduler.isInitialLoading}
+                itemsMap={itemsMap}
             />
         </>
     );
@@ -233,6 +262,8 @@ interface Props {
     >;
     onClose: () => void;
     isChart: boolean;
+    isThresholdAlert?: boolean;
+    itemsMap?: ItemsMap;
 }
 
 const SchedulerModalContent: FC<Omit<Props, 'name'>> = ({
@@ -240,11 +271,13 @@ const SchedulerModalContent: FC<Omit<Props, 'name'>> = ({
     schedulersQuery,
     createMutation,
     isChart,
+    isThresholdAlert,
+    itemsMap,
     onClose = () => {},
 }) => {
     const [state, setState] = useState<States>(States.LIST);
     const [schedulerUuid, setSchedulerUuid] = useState<string | undefined>();
-    const history = useHistory();
+    const navigate = useNavigate();
     const { search, pathname } = useLocation();
 
     useEffect(() => {
@@ -257,12 +290,33 @@ const SchedulerModalContent: FC<Omit<Props, 'name'>> = ({
             // remove from url param after modal is open
             const newParams = new URLSearchParams(search);
             newParams.delete('scheduler_uuid');
-            history.replace({
-                pathname,
-                search: newParams.toString(),
-            });
+            void navigate(
+                {
+                    pathname,
+                    search: newParams.toString(),
+                },
+                { replace: true },
+            );
+        } else {
+            const thresholdUuidFromUrlParams =
+                getThresholdUuidFromUrlParams(search);
+            if (thresholdUuidFromUrlParams) {
+                setState(States.EDIT);
+                setSchedulerUuid(thresholdUuidFromUrlParams);
+
+                // remove from url param after modal is open
+                const newParams = new URLSearchParams(search);
+                newParams.delete('threshold_uuid');
+                void navigate(
+                    {
+                        pathname,
+                        search: newParams.toString(),
+                    },
+                    { replace: true },
+                );
+            }
         }
-    }, [history, pathname, search]);
+    }, [navigate, pathname, search]);
 
     return (
         <>
@@ -275,6 +329,7 @@ const SchedulerModalContent: FC<Omit<Props, 'name'>> = ({
                         setState(States.EDIT);
                         setSchedulerUuid(schedulerUuidToUpdate);
                     }}
+                    isThresholdAlertList={isThresholdAlert}
                 />
             )}
             {state === States.CREATE && (
@@ -282,13 +337,17 @@ const SchedulerModalContent: FC<Omit<Props, 'name'>> = ({
                     resourceUuid={resourceUuid}
                     createMutation={createMutation}
                     isChart={isChart}
+                    itemsMap={itemsMap}
                     onBack={() => setState(States.LIST)}
+                    isThresholdAlert={isThresholdAlert}
                 />
             )}
             {state === States.EDIT && schedulerUuid && (
                 <UpdateStateContent
                     schedulerUuid={schedulerUuid}
+                    itemsMap={itemsMap}
                     onBack={() => setState(States.LIST)}
+                    isThresholdAlert={isThresholdAlert}
                 />
             )}
         </>

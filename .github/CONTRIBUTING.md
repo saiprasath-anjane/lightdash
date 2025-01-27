@@ -4,15 +4,15 @@ Thanks for taking the time to contribute ❤️ all types of contributions are e
 
 ## Table of Contents
 
-- [Code of Conduct](#code-of-conduct)
-- [How to ask for help](#how-to-ask-for-help)
--  Contributing:
-    - [Report a bug](#how-to-report-a-bug)
-    - [Request a feature](#how-to-request-a-new-feature)
-    - [Contribute code](#how-to-contribute-code-to-lightdash)
-- [Opening a Pull Request](#opening-a-pull-request)
-- [Setup Development Environment](#setup-development-environment)
-- [Join The Lightdash Team](#join-the-lightdash-team)
+-   [Code of Conduct](#code-of-conduct)
+-   [How to ask for help](#how-to-ask-for-help)
+-   Contributing:
+    -   [Report a bug](#how-to-report-a-bug)
+    -   [Request a feature](#how-to-request-a-new-feature)
+    -   [Contribute code](#how-to-contribute-code-to-lightdash)
+-   [Opening a Pull Request](#opening-a-pull-request)
+-   [Setup Development Environment](#setup-development-environment)
+-   [Join The Lightdash Team](#join-the-lightdash-team)
 
 ## Code of Conduct
 
@@ -24,15 +24,15 @@ to <support@lightdash.com>.
 ## How to ask for help
 
 Useful resources for answering your questions:
- - [Documentation](https://docs.lightdash.com)
- - [Issues](https://github.com/lightdash/lightdash/issues)
 
-If you cannot find an answer to your question then please join our [slack community](https://lightdash-community.slack.com/join/shared_invite/zt-1busg6781-EgwQ6sPLAK3~QU7GA3ttzQ#/shared-invite/email) and head for the `#help` channel.
+-   [Documentation](https://docs.lightdash.com)
+-   [Issues](https://github.com/lightdash/lightdash/issues)
 
+If you cannot find an answer to your question then please join our [slack community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2uwa5s9jl-xTNyjJ7otC8wH3jB8qgCpA) and head for the `#help` channel.
 
 ## How to report a bug
 
-> Vulnerabilities can be submitted through the GitHub repository security tab or by email at  <security@lightdash.com>.
+> Vulnerabilities can be submitted through the GitHub repository security tab or by email at <security@lightdash.com>.
 
 We use GitHub issues to track bugs and errors. If you run into an issue with the project:
 
@@ -63,14 +63,13 @@ Enhancement suggestions are tracked as [GitHub issues](https://github.com/lightd
 > When contributing to this project, you must agree that you have authored 100% of the content, that you have the
 > necessary rights to the content and that the content you contribute may be provided under the project license.
 
-
 Before contributing to Lightdash you must complete the following steps:
 
-- Join our [slack community](https://lightdash-community.slack.com/join/shared_invite/zt-1busg6781-EgwQ6sPLAK3~QU7GA3ttzQ) and introduce yourself in the `#community-contributors` channel
-- Choose an existing labelled `open-contribution`
-- Ask a member of the team to assign you to the issue
+-   Join our [slack community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2uwa5s9jl-xTNyjJ7otC8wH3jB8qgCpA) and introduce yourself in the `#community-contributors` channel
+-   Choose an existing labelled `open-contribution`
+-   Ask a member of the team to assign you to the issue
 
-Pull requests will not be reviewed unless the previous three steps are completed. 
+Pull requests will not be reviewed unless the previous three steps are completed.
 
 ---
 
@@ -120,10 +119,10 @@ git checkout main
 git pull upstream main
 ```
 
-4. Install the dependencies with yarn (npm isn't supported):
+4. Install the dependencies with pnpm (npm/yarn isn't supported):
 
 ```sh
-yarn install
+pnpm install
 ```
 
 5. Create a new topic branch:
@@ -207,11 +206,11 @@ Once connected run the following commands in the VS Code terminal:
 
 ```shell
 # Setup the database
-yarn workspace backend migrate
-yarn workspace backend seed
+pnpm -F backend migrate
+pnpm -F backend seed
 
 # Run Lightdash frontend and backend in dev mode
-yarn dev
+pnpm dev
 ```
 
 #### using Docker compose
@@ -223,23 +222,11 @@ Alternatively you can create a developer environment using docker compose:
 git clone https://github.com/lightdash/lightdash
 ```
 
-Copy `.env.development` into a new file called `.env.development.local`
-
-Edit all the ENV variables in that file to match your setup, eg:
-
-```shell
-PGHOST=localhost
-PGPORT=5432
-PGUSER=pg_user *OR* machine username if no prior postgres set up
-PGPASSWORD=pg_password *OR* blank if no prior postgres set up
-PGDATABASE=postgres
-DBT_DEMO_DIR=/*path*/*to*/lightdash/project/examples/full-jaffle-shop-demo
-LIGHTDASH_CONFIG_FILE=/*path*/*to*/lightdash/lightdash.yml
-```
+Copy `.env.development` into a new file called `.env.development.local` and run the following `docker compose up` command:
 
 ```shell
 # Create docker containers
-Note: before the next step make sure your docker has 4GB of memory ( Docker -> settings -> resources ) you should be able to manipulate the values here.
+# Note: before the next step make sure your docker has 4GB of memory ( Docker -> settings -> resources ) you should be able to manipulate the values here.
 
 docker compose -p lightdash-app -f docker/docker-compose.dev.yml --env-file .env.development.local up --detach --remove-orphans
 ```
@@ -250,8 +237,8 @@ When ready, access the development container and run these commands:
 # Connect to container
 docker exec -it lightdash-app-lightdash-dev-1 bash
 
-# Skip puppeteer download
-export PUPPETEER_SKIP_DOWNLOAD=true
+# Skip playwright download
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 
 # Install dependencies & build common package
 ./scripts/build.sh
@@ -264,24 +251,25 @@ export PUPPETEER_SKIP_DOWNLOAD=true
 ./scripts/seed-lightdash.sh
 
 # Run Lightdash frontend and backend in dev mode
-yarn dev # http://localhost:3000
+pnpm dev # http://localhost:3000
 
 # Log in dev mode
-When navigating to http://localhost:3000 you will be prompt to the login page, you can use our demo login details:
+# When navigating to http://localhost:3000 you will be prompt to the login page, you can use our demo login details:
 
-Username: demo@lightdash.com
-Password: demo_password!
+# Username: demo@lightdash.com
+# Password: demo_password!
 
 # Or run in production mode
-# yarn build
-# yarn start # http://localhost:8080
+# pnpm build
+# pnpm start # http://localhost:8080
 ```
 
 Notes:
 
--   If you change files inside `/packages/common` you should run `yarn common-build` before `yarn dev`
--   If you change files inside `/packages/warehouses` you should run `yarn warehouses-build` before `yarn dev`
+-   If you change files inside `/packages/common` you should run `pnpm common-build` before `pnpm dev`
+-   If you change files inside `/packages/warehouses` you should run `pnpm warehouses-build` before `pnpm dev`
 -   If you rename files the container might not recognise the changes. To fix this, stop the containers and start again.
+-   If you need to change any of the environment variables, you can do so by editing `.env.development.local` and re-run the `docker compose up` command mentioned above
 
 When you want to stop:
 
@@ -300,63 +288,62 @@ docker compose -p lightdash-app -f docker/docker-compose.dev.yml --env-file .env
 To setup Development Environment without Docker you need following pre-requisites before running Lightdash:
 
 -   node >= v18.x (20 is preferred)
--   yarn
--   postgres
+-   pnpm
+-   postgres >= 12
 -   dbt 1.4.x or 1.5.x
 
 eg. on MacOS you can follow this instructions:
 
 ```shell
-#1 install brew (https://brew.sh)
+# 1 Install Homebrew (https://brew.sh)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-#2 install nvm (https://github.com/nvm-sh/nvm#troubleshooting-on-macos)
+# 2 Install nvm (https://github.com/nvm-sh/nvm#troubleshooting-on-macos)
 brew update
 brew install nvm
 
-#3 install specified node version using NVM (https://github.com/nvm-sh/nvm)
+# 3 Install specified node version using NVM (https://github.com/nvm-sh/nvm)
 
 nvm install v20.8.0
 nvm alias default v20.8.0
 
-#4 install postgres (https://wiki.postgresql.org/wiki/Homebrew)
+# 4 Install postgres (https://wiki.postgresql.org/wiki/Homebrew)
 brew install postgresql@14
 brew services start postgresql@14
 
-#5 install dbt (https://docs.getdbt.com/dbt-cli/install/homebrew)
-brew tap dbt-labs/dbt@1.4.9
-brew install dbt-postgres@1.4.9
+# 5 Install dbt (https://docs.getdbt.com/dbt-cli/install/homebrew)
+brew tap dbt-labs/dbt
+brew install dbt-postgres@1.5.4
 
-#6 clone the repo and open it in your IDE
+# 6 Clone the repo and open it in your IDE
 git clone https://github.com/lightdash/lightdash.git
 cd lightdash
 
-#7 Copy `.env.development` to `.env.development.local`
+# 7 Copy `.env.development` to `.env.development.local`
 cp .env.development .env.development.local
 
-#8 Edit some environment variables to match your setup
+# 8 Edit some environment variables to match your setup
 open .env.development.local -t
 
-# here is some variables that you might need to edit:
+# 8.1 You may need to edit the following variables:
 PGHOST=localhost
 PGPORT=5432
 PGUSER=pg_user *OR* machine username if no prior postgres set up
 PGPASSWORD=pg_password *OR* blank if no prior postgres set up
 PGDATABASE=postgres
 DBT_DEMO_DIR=$PWD/examples/full-jaffle-shop-demo
-LIGHTDASH_CONFIG_FILE=$PWD/lightdash.yml
 
-#9 install packages
-yarn
+# 9 Install packages
+pnpm install
 
-#10 build / migrate / seed
-yarn load:env ./scripts/build.sh
-yarn load:env ./scripts/seed-jaffle.sh
-yarn load:env ./scripts/migrate.sh
-yarn load:env ./scripts/seed-lightdash.sh
+# 10 Build / migrate / seed
+pnpm load:env ./scripts/build.sh
+pnpm load:env ./scripts/seed-jaffle.sh
+pnpm load:env ./scripts/migrate.sh
+pnpm load:env ./scripts/seed-lightdash.sh
 
-# run
-yarn load:env yarn dev
+# Run
+pnpm load:env pnpm dev
 
 # Log in dev mode
 When navigating to http://localhost:3000 you will be prompt to the login page, you can use our demo login details:
@@ -365,18 +352,18 @@ Username: demo@lightdash.com
 Password: demo_password!
 ```
 
-> ⚠️ you can add env variables to your system and ignore running `yarn load:env` before each command
+> ⚠️ you can add env variables to your system and ignore running `pnpm load:env` before each command
 
 #### How to run unit tests
 
 ```shell
 # Prepare dependencies
-yarn install
-yarn common-build
-yarn warehouses-build
+pnpm install
+pnpm common-build
+pnpm warehouses-build
 
 # Run unit tests
-yarn test
+pnpm test
 ```
 
 #### How to run e2e tests
@@ -385,15 +372,15 @@ Before running e2e tests make sure you're running the app locally.
 
 ```shell
 # Prepare dependencies
-yarn install
-yarn common-build
-yarn warehouses-build
+pnpm install
+pnpm common-build
+pnpm warehouses-build
 
-# run cypress in interactive mode
-yarn e2e-open
+# Run cypress in interactive mode
+pnpm e2e-open
 
-# or run cypress in cli mode
-yarn e2e-run
+# Or run cypress in cli mode
+pnpm e2e-run
 ```
 
 Note:
@@ -403,8 +390,8 @@ Note:
 #### How to check code quality
 
 ```shell
-yarn lint
-yarn format
+pnpm lint
+pnpm format
 ```
 
 #### Developing API endpoints
@@ -414,7 +401,7 @@ then registered in `packages/backend/src/index.ts` but in order to be made avail
 `routes.ts` file by executing:
 
 ```shell
-yarn workspace backend run tsoa routes
+pnpm -F backend run tsoa routes
 ```
 
 ### Running headless browser locally
@@ -426,35 +413,35 @@ If you want to debug some of these features, you should run headless browser loc
 
 #### Running Lightdash on docker and headless browser
 
-If you are running both Lightdash and Headless browser using our docker-compose you should be ok, and everything should work as expected.
+If you are running both Lightdash and Headless browser using our docker-compose yml set-up you should be ok, and everything should work as expected.
 
 #### Running Lightdash without docker and headless browser on Linux
 
 If you are running lightdash without docker, you will have to run headless browser in a way that it is able to connect
 to your lightdash endpoint in localhost. You can achive this on Linux by doing:
 
-```
+```shell
 docker run -e PORT=3001 --name=lightdash-headless --network 'host' -it --rm browserless/chrome
 ```
 
 Then make sure to configure the following ENV variables:
 
-```
+```shell
 export HEADLESS_BROWSER_HOST='localhost'
 export HEADLESS_BROWSER_PORT=3001
 export SITE_URL=http://localhost:3000
 ```
 
-#### Running Lighdtash without docker and headless browser on Mac
+#### Running Lightdash without docker and headless browser on Mac
 
 If you are running Lightdash without docker on Mac, you will have to run docker and create an special host to reach
 lightdash because it can't use localhost.
 
-```
+```shell
 docker run -e PORT=3001 -p 3001:3001 --name=lightdash-headless --add-host=lightdash-dev:host-gateway -it --rm browserless/chrome
 ```
 
-make sure to add the following line to your `/etc/hosts` file:
+Make sure to add the following line to your `/etc/hosts` file:
 
 ```
 127.0.0.1 lightdash-dev
@@ -464,7 +451,7 @@ Then headless browser should be able to reach lightdash on `http://lightdash-dev
 
 So make sure to configure the following ENV variables:
 
-```
+```shell
 export HEADLESS_BROWSER_HOST='localhost'
 export HEADLESS_BROWSER_PORT=3001
 export SITE_URL=http://lightdash-dev:3000

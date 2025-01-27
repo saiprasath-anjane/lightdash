@@ -1,14 +1,14 @@
 import {
-    CustomDimension,
-    Field,
     getItemId,
-    SortField,
-    TableCalculation,
+    type CustomDimension,
+    type Field,
+    type SortField,
+    type TableCalculation,
 } from '@lightdash/common';
 import { Menu, Text } from '@mantine/core';
 import { IconCheck } from '@tabler/icons-react';
-import { FC } from 'react';
-import { useExplorerContext } from '../../../providers/ExplorerProvider';
+import { type FC } from 'react';
+import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import {
     getSortDirectionOrder,
     getSortLabel,
@@ -39,6 +39,7 @@ const ColumnHeaderSortMenuOptions: FC<Props> = ({ item, sort }) => {
 
     return (
         <>
+            <Menu.Label>Sorting</Menu.Label>
             {item &&
                 getSortDirectionOrder(item).map((sortDirection) => (
                     <Menu.Item

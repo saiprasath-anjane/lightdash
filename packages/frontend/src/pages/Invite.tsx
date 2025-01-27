@@ -1,9 +1,9 @@
 import {
-    ActivateUserWithInviteCode,
-    ApiError,
-    CreateUserArgs,
-    LightdashUser,
     OpenIdIdentityIssuerType,
+    type ActivateUserWithInviteCode,
+    type ApiError,
+    type CreateUserArgs,
+    type LightdashUser,
 } from '@lightdash/common';
 import {
     Anchor,
@@ -15,10 +15,9 @@ import {
     Text,
     Title,
 } from '@mantine/core';
-import { FC, useEffect, useState } from 'react';
-import { useMutation } from 'react-query';
-import { Redirect, useLocation, useParams } from 'react-router-dom';
-
+import { useMutation } from '@tanstack/react-query';
+import { useEffect, useState, type FC } from 'react';
+import { Navigate, useLocation, useParams } from 'react-router';
 import { lightdashApi } from '../api';
 import Page from '../components/common/Page/Page';
 import { ThirdPartySignInButton } from '../components/common/ThirdPartySignInButton';
@@ -28,8 +27,8 @@ import { useOrganization } from '../hooks/organization/useOrganization';
 import useToaster from '../hooks/toaster/useToaster';
 import { useFlashMessages } from '../hooks/useFlashMessages';
 import { useInviteLink } from '../hooks/useInviteLink';
-import { useApp } from '../providers/AppProvider';
-import { useTracking } from '../providers/TrackingProvider';
+import useApp from '../providers/App/useApp';
+import useTracking from '../providers/Tracking/useTracking';
 import LightdashLogo from '../svgs/lightdash-black.svg';
 
 interface WelcomeCardProps {
@@ -102,7 +101,7 @@ const createUserQuery = async (data: ActivateUserWithInviteCode) =>
 const Invite: FC = () => {
     const { inviteCode } = useParams<{ inviteCode: string }>();
     const { health } = useApp();
-    const { showToastError } = useToaster();
+    const { showToastError, showToastApiError } = useToaster();
     const flashMessages = useFlashMessages();
 
     useEffect(() => {
@@ -127,10 +126,10 @@ const Invite: FC = () => {
             identify({ id: data.userUuid });
             window.location.href = redirectUrl;
         },
-        onError: (error) => {
-            showToastError({
+        onError: ({ error }) => {
+            showToastApiError({
                 title: `Failed to create user`,
-                subtitle: error.error.message,
+                apiError: error,
             });
         },
     });
@@ -147,19 +146,20 @@ const Invite: FC = () => {
         }
     }, [search]);
 
-    if (health.isLoading || inviteLinkQuery.isLoading) {
+    if (health.isInitialLoading || inviteLinkQuery.isInitialLoading) {
         return <PageSpinner />;
     }
 
     if (health.status === 'success' && health.data?.isAuthenticated) {
-        return <Redirect to={{ pathname: redirectUrl }} />;
+        return <Navigate to={{ pathname: redirectUrl }} />;
     }
 
     const ssoAvailable =
         health.data?.auth.google.enabled ||
         health.data?.auth.okta.enabled ||
         health.data?.auth.oneLogin.enabled ||
-        health.data?.auth.azuread.enabled;
+        health.data?.auth.azuread.enabled ||
+        health.data?.auth.oidc.enabled;
     const ssoLogins = ssoAvailable && (
         <Stack>
             {Object.values(OpenIdIdentityIssuerType).map((providerName) => (
@@ -173,7 +173,7 @@ const Invite: FC = () => {
             ))}
         </Stack>
     );
-    const passwordLogin = allowPasswordAuthentication && (
+    const passwordLogin = allowPasswordAuthentication && inviteCode && (
         <CreateUserForm
             isLoading={isLoading || isSuccess}
             readOnlyEmail={inviteLinkQuery.data?.email}

@@ -5,15 +5,15 @@ import {
     IconSquarePlus,
     IconTrash,
 } from '@tabler/icons-react';
-import React, { FC } from 'react';
-import { useQueryClient } from 'react-query';
-import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import React, { type FC } from 'react';
+import { Link } from 'react-router';
 import { SchedulerDeleteModal } from '../../features/scheduler';
 import MantineIcon from '../common/MantineIcon';
 import {
     getItemLink,
     getSchedulerLink,
-    SchedulerItem,
+    type SchedulerItem,
 } from './SchedulersViewUtils';
 
 interface SchedulersViewActionMenuProps {
@@ -30,10 +30,12 @@ const SchedulersViewActionMenu: FC<SchedulersViewActionMenuProps> = ({
 }) => {
     const [isDeleting, setIsDeleting] = React.useState(false);
     const queryClient = useQueryClient();
+
     const handleDelete = async () => {
         setIsDeleting(false);
-        queryClient.invalidateQueries('schedulerLogs');
+        await queryClient.invalidateQueries(['schedulerLogs']);
     };
+
     return (
         <>
             <Menu

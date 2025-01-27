@@ -1,14 +1,13 @@
-import { getCustomDimensionId } from '@lightdash/common';
-import { Box, Checkbox, Stack, Title, Tooltip } from '@mantine/core';
-import React, { FC, useCallback, useMemo, useState } from 'react';
-import { DragDropContext, DropResult } from 'react-beautiful-dnd';
+import { DragDropContext, type DropResult } from '@hello-pangea/dnd';
+import { Box, Checkbox, Stack, Switch, Tooltip } from '@mantine/core';
+import { useCallback, useMemo, useState, type FC } from 'react';
 import useToaster from '../../../hooks/toaster/useToaster';
-import { isTableVisualizationConfig } from '../../LightdashVisualization/VisualizationConfigTable';
-import { useVisualizationContext } from '../../LightdashVisualization/VisualizationProvider';
+import { isTableVisualizationConfig } from '../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
+import { Config } from '../common/Config';
 import ColumnConfiguration from './ColumnConfiguration';
+import { MAX_PIVOTS } from './constants';
 import DroppableItemsList from './DroppableItemsList';
-
-export const MAX_PIVOTS = 3;
 
 enum DroppableIds {
     COLUMNS = 'COLUMNS',
@@ -25,7 +24,7 @@ const GeneralSettings: FC = () => {
     const [isDragging, setIsDragging] = useState<boolean>(false);
     const { showToastError } = useToaster();
     const {
-        metricQuery: { dimensions, customDimensions },
+        metricQuery: { dimensions },
     } = resultsData || { metricQuery: { dimensions: [] as string[] } };
 
     const isTableConfig = isTableVisualizationConfig(visualizationConfig);
@@ -41,10 +40,9 @@ const GeneralSettings: FC = () => {
     }: { columns: string[]; rows: string[]; metrics: string[] } =
         useMemo(() => {
             const columnFields = pivotDimensions ?? [];
-            const rowsFields = [
-                ...dimensions,
-                ...(customDimensions?.map(getCustomDimensionId) || []),
-            ].filter((itemId) => !pivotDimensions?.includes(itemId));
+            const rowsFields = [...dimensions].filter(
+                (itemId) => !pivotDimensions?.includes(itemId),
+            );
             const metricsFields = (chartConfig?.selectedItemIds ?? []).filter(
                 (id) => ![...columnFields, ...rowsFields].includes(id),
             );
@@ -53,7 +51,7 @@ const GeneralSettings: FC = () => {
                 rows: rowsFields,
                 metrics: metricsFields,
             };
-        }, [pivotDimensions, dimensions, chartConfig, customDimensions]);
+        }, [pivotDimensions, dimensions, chartConfig]);
 
     const handleToggleMetricsAsRows = useCallback(() => {
         if (!chartConfig) return;
@@ -70,11 +68,11 @@ const GeneralSettings: FC = () => {
         const newValue = !metricsAsRows;
 
         if (newValue) {
-            setShowColumnCalculation(showRowCalculation);
-            setShowRowCalculation(showColumnCalculation);
+            setShowColumnCalculation(showColumnCalculation);
+            setShowRowCalculation(showRowCalculation);
         } else {
-            setShowColumnCalculation(showRowCalculation);
-            setShowRowCalculation(showColumnCalculation);
+            setShowColumnCalculation(showColumnCalculation);
+            setShowRowCalculation(showRowCalculation);
         }
 
         setMetricsAsRows(newValue);
@@ -143,73 +141,93 @@ const GeneralSettings: FC = () => {
     if (!chartConfig) return null;
 
     const {
-        canUsePivotTable,
+        isPivotTableEnabled,
+        canUseSubtotals,
         hideRowNumbers,
         metricsAsRows,
         setHideRowNumbers,
         setShowColumnCalculation,
         setShowResultsTotal,
         setShowRowCalculation,
+        setShowSubtotals,
         setShowTableNames,
         showColumnCalculation,
         showResultsTotal,
         showRowCalculation,
+        showSubtotals,
         showTableNames,
     } = chartConfig;
 
     return (
-        <Stack spacing={0}>
+        <Stack>
             <DragDropContext
                 onDragStart={() => setIsDragging(true)}
                 onDragEnd={onDragEnd}
             >
-                <Title order={6}>Columns</Title>
-                <DroppableItemsList
-                    droppableId={DroppableIds.COLUMNS}
-                    itemIds={columns}
-                    isDragging={isDragging}
-                    disableReorder={false}
-                    placeholder={
-                        'Move dimensions to columns to pivot your table'
-                    }
-                />
-                <Title order={6}>Rows</Title>
-                <DroppableItemsList
-                    droppableId={DroppableIds.ROWS}
-                    itemIds={rows}
-                    isDragging={isDragging}
-                    disableReorder={true}
-                />
+                <Config>
+                    <Config.Section>
+                        <Config.Heading>Columns</Config.Heading>
+                        <DroppableItemsList
+                            droppableId={DroppableIds.COLUMNS}
+                            itemIds={columns}
+                            isDragging={isDragging}
+                            disableReorder={false}
+                            placeholder={
+                                'Drag dimensions into this area to pivot your table'
+                            }
+                        />
+
+                        <Config.Heading>Rows</Config.Heading>
+                        <DroppableItemsList
+                            droppableId={DroppableIds.ROWS}
+                            itemIds={rows}
+                            isDragging={isDragging}
+                            disableReorder={true}
+                            placeholder={
+                                'Drag dimensions into this area to group your data'
+                            }
+                        />
+                    </Config.Section>
+                </Config>
             </DragDropContext>
 
-            <Title order={6}>Metrics</Title>
-            <Tooltip
-                disabled={!!canUsePivotTable}
-                label={
-                    'To use metrics as rows, you need to move a dimension to "Columns"'
-                }
-                w={300}
-                multiline
-                withinPortal
-                position="top-start"
-            >
-                <Box my="sm">
-                    <Checkbox
-                        disabled={!canUsePivotTable}
-                        label="Show metrics as rows"
-                        checked={metricsAsRows}
-                        onChange={() => handleToggleMetricsAsRows()}
-                    />
-                </Box>
-            </Tooltip>
-            <Stack spacing="xs" mb="md">
+            <Config.Section>
+                <Config.Section>
+                    <Config.Heading>Metrics</Config.Heading>
+                    <Tooltip
+                        disabled={!!isPivotTableEnabled && !showSubtotals}
+                        label={
+                            showSubtotals
+                                ? 'Metrics as rows are not available when subtotals are enabled'
+                                : 'To use metrics as rows, you need to move a dimension to "Columns"'
+                        }
+                        w={300}
+                        multiline
+                        withinPortal
+                        position="top-start"
+                    >
+                        <Box>
+                            <Switch
+                                disabled={!isPivotTableEnabled || showSubtotals}
+                                label="Show metrics as rows"
+                                labelPosition="right"
+                                checked={metricsAsRows}
+                                onChange={() => handleToggleMetricsAsRows()}
+                            />
+                        </Box>
+                    </Tooltip>
+                </Config.Section>
+            </Config.Section>
+
+            <Config.Section>
                 {metrics.map((itemId) => (
                     <ColumnConfiguration key={itemId} fieldId={itemId} />
                 ))}
-            </Stack>
+            </Config.Section>
 
-            <Title order={6}>Options</Title>
-            <Stack mt="sm" spacing="xs">
+            <Config.Section>
+                <Config.Heading>Display</Config.Heading>
+
                 <Checkbox
                     label="Show table names"
                     checked={showTableNames}
@@ -217,7 +235,6 @@ const GeneralSettings: FC = () => {
                         setShowTableNames(!showTableNames);
                     }}
                 />
-
                 <Checkbox
                     label="Show row numbers"
                     checked={!hideRowNumbers}
@@ -225,7 +242,11 @@ const GeneralSettings: FC = () => {
                         setHideRowNumbers(!hideRowNumbers);
                     }}
                 />
-                {canUsePivotTable ? (
+            </Config.Section>
+
+            <Config.Section>
+                <Config.Heading>Results</Config.Heading>
+                {isPivotTableEnabled ? (
                     <Checkbox
                         label="Show row totals"
                         checked={showRowCalculation}
@@ -248,7 +269,36 @@ const GeneralSettings: FC = () => {
                         setShowResultsTotal(!showResultsTotal);
                     }}
                 />
-            </Stack>
+                <Tooltip
+                    disabled={canUseSubtotals}
+                    label={
+                        metricsAsRows
+                            ? 'Subtotals cannot be used with metrics as rows'
+                            : `Subtotals can only be used on tables with at least two ${
+                                  isPivotTableEnabled ? 'un-pivoted' : ''
+                              } dimensions`
+                    }
+                    w={300}
+                    multiline
+                    withinPortal
+                    position="top-start"
+                >
+                    <Box>
+                        <Checkbox
+                            label="Show subtotals"
+                            checked={
+                                canUseSubtotals &&
+                                !metricsAsRows &&
+                                showSubtotals
+                            }
+                            onChange={() => {
+                                setShowSubtotals(!showSubtotals);
+                            }}
+                            disabled={!canUseSubtotals || metricsAsRows}
+                        />
+                    </Box>
+                </Tooltip>
+            </Config.Section>
         </Stack>
     );
 };

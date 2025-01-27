@@ -1,5 +1,17 @@
-import { LightdashPage } from '@lightdash/common';
-import { KnownBlock, LinkUnfurls, SectionBlock } from '@slack/bolt';
+import {
+    AnyType,
+    friendlyName,
+    LightdashPage,
+    operatorActionValue,
+    ThresholdOperator,
+    ThresholdOptions,
+} from '@lightdash/common';
+import {
+    KnownBlock,
+    LinkUnfurls,
+    SectionBlock,
+    SectionBlockAccessory,
+} from '@slack/bolt';
 import { Unfurl } from '../../services/UnfurlService/UnfurlService';
 import { AttachmentUrl } from '../EmailClient/EmailClient';
 
@@ -11,17 +23,28 @@ type GetChartAndDashboardBlocksArgs = {
     ctaUrl: string;
     imageUrl?: string;
     footerMarkdown?: string;
+    includeLinks?: boolean;
 };
 
 const getSectionFields = (
     fields: [string, string | undefined][],
-): SectionBlock['fields'] =>
-    fields
-        .filter(([, text]) => Boolean(text))
-        .map(([title, text]) => ({
-            type: 'mrkdwn',
-            text: `*${title}*: \n${text}`,
-        }));
+): SectionBlock['fields'] => {
+    const availableFields = fields.filter(([, text]) => Boolean(text));
+
+    if (availableFields.length === 0) {
+        // Return empty field placeholder to avoid `cannot_parse_attachment` error from Slack
+        return [
+            {
+                type: 'mrkdwn',
+                text: ' ',
+            },
+        ];
+    }
+    return availableFields.map(([title, text]) => ({
+        type: 'mrkdwn',
+        text: `*${title}*: \n${text}`,
+    }));
+};
 
 const getBlocks = (blocks: (KnownBlock | undefined)[]): KnownBlock[] =>
     blocks.filter((block): block is KnownBlock => Boolean(block));
@@ -34,8 +57,22 @@ export const getChartAndDashboardBlocks = ({
     imageUrl,
     ctaUrl,
     footerMarkdown,
-}: GetChartAndDashboardBlocksArgs): KnownBlock[] =>
-    getBlocks([
+    includeLinks,
+}: GetChartAndDashboardBlocksArgs): KnownBlock[] => {
+    const lightdashLink: SectionBlockAccessory | undefined =
+        includeLinks === false
+            ? undefined
+            : {
+                  type: 'button',
+                  text: {
+                      type: 'plain_text',
+                      text: 'Open in Lightdash',
+                      emoji: true,
+                  },
+                  url: ctaUrl,
+                  action_id: 'button-action',
+              };
+    return getBlocks([
         {
             type: 'header',
             text: {
@@ -58,16 +95,7 @@ export const getChartAndDashboardBlocks = ({
                 ['name', name],
                 ['description', description],
             ]),
-            accessory: {
-                type: 'button',
-                text: {
-                    type: 'plain_text',
-                    text: 'Open in Lightdash',
-                    emoji: true,
-                },
-                url: ctaUrl,
-                action_id: 'button-action',
-            },
+            accessory: lightdashLink,
         },
         imageUrl
             ? {
@@ -88,7 +116,7 @@ export const getChartAndDashboardBlocks = ({
               }
             : undefined,
     ]);
-
+};
 type GetChartCsvResultsBlocksArgs = {
     name: string;
     title: string;
@@ -97,6 +125,7 @@ type GetChartCsvResultsBlocksArgs = {
     ctaUrl: string;
     csvUrl?: string;
     footerMarkdown?: string;
+    includeLinks?: boolean;
 };
 export const getChartCsvResultsBlocks = ({
     name,
@@ -106,8 +135,22 @@ export const getChartCsvResultsBlocks = ({
     csvUrl,
     ctaUrl,
     footerMarkdown,
-}: GetChartCsvResultsBlocksArgs): KnownBlock[] =>
-    getBlocks([
+    includeLinks,
+}: GetChartCsvResultsBlocksArgs): KnownBlock[] => {
+    const lightdashLink: SectionBlockAccessory | undefined =
+        includeLinks === false
+            ? undefined
+            : {
+                  type: 'button',
+                  text: {
+                      type: 'plain_text',
+                      text: 'Open in Lightdash',
+                      emoji: true,
+                  },
+                  url: ctaUrl,
+                  action_id: 'button-action',
+              };
+    return getBlocks([
         {
             type: 'header',
             text: {
@@ -130,16 +173,7 @@ export const getChartCsvResultsBlocks = ({
                 ['name', name],
                 ['description', description],
             ]),
-            accessory: {
-                type: 'button',
-                text: {
-                    type: 'plain_text',
-                    text: 'Open in Lightdash',
-                    emoji: true,
-                },
-                url: ctaUrl,
-                action_id: 'button-action',
-            },
+            accessory: lightdashLink,
         },
 
         csvUrl
@@ -178,7 +212,103 @@ export const getChartCsvResultsBlocks = ({
               }
             : undefined,
     ]);
+};
+type GetChartThresholdBlocksArgs = {
+    name: string;
 
+    title: string;
+    message?: string;
+    description: string | undefined;
+    ctaUrl: string;
+    imageUrl?: string;
+    footerMarkdown?: string;
+    thresholds: ThresholdOptions[];
+    includeLinks?: boolean;
+};
+export const getChartThresholdAlertBlocks = ({
+    name,
+    title,
+    message,
+    description,
+    imageUrl,
+    ctaUrl,
+    thresholds,
+    footerMarkdown,
+    includeLinks,
+}: GetChartThresholdBlocksArgs): KnownBlock[] => {
+    // TODO only pass threshold conditions met
+    // TODO send field name from explore or results (instead of friendly name)
+    const lightdashLink: SectionBlockAccessory | undefined =
+        includeLinks === false
+            ? undefined
+            : {
+                  type: 'button',
+                  text: {
+                      type: 'plain_text',
+                      text: 'Open in Lightdash',
+                      emoji: true,
+                  },
+                  url: ctaUrl,
+                  action_id: 'button-action',
+              };
+    const thresholdBlocks: KnownBlock[] = thresholds.map((threshold) => ({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: `• *${friendlyName(threshold.fieldId)}* ${operatorActionValue(
+                threshold.operator,
+                threshold.value,
+                '*',
+            )}`,
+        },
+    }));
+    return getBlocks([
+        {
+            type: 'header',
+            text: {
+                type: 'plain_text',
+                text: title,
+            },
+        },
+        message
+            ? {
+                  type: 'section',
+                  text: {
+                      type: 'mrkdwn',
+                      text: message,
+                  },
+              }
+            : undefined,
+
+        {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: `Your results for the chart *${name}* triggered the following alerts:`,
+            },
+            accessory: lightdashLink,
+        },
+        ...thresholdBlocks,
+        imageUrl
+            ? {
+                  type: 'image',
+                  image_url: imageUrl,
+                  alt_text: title,
+              }
+            : undefined,
+        footerMarkdown
+            ? {
+                  type: 'context',
+                  elements: [
+                      {
+                          type: 'mrkdwn',
+                          text: footerMarkdown,
+                      },
+                  ],
+              }
+            : undefined,
+    ]);
+};
 type GetDashboardCsvResultsBlocksArgs = {
     title: string;
     name: string;
@@ -231,23 +361,33 @@ export const getDashboardCsvResultsBlocks = ({
                 action_id: 'button-action',
             },
         },
-        ...csvUrls.map<KnownBlock>((csvUrl, index) => ({
-            type: 'section',
-            text: {
-                type: 'mrkdwn',
-                text: `:black_small_square: ${csvUrl.filename}`,
-            },
-            accessory: {
-                type: 'button',
-                text: {
-                    type: 'plain_text',
-                    text: 'Download results',
-                    emoji: true,
-                },
-                url: csvUrl.path,
-                action_id: `download-results-${index}`,
-            },
-        })),
+        ...csvUrls.map<KnownBlock>((csvUrl, index) =>
+            csvUrl.path !== '#no-results'
+                ? {
+                      type: 'section',
+                      text: {
+                          type: 'mrkdwn',
+                          text: `:black_small_square: ${csvUrl.filename}`,
+                      },
+                      accessory: {
+                          type: 'button',
+                          text: {
+                              type: 'plain_text',
+                              text: 'Download results',
+                              emoji: true,
+                          },
+                          url: csvUrl.path,
+                          action_id: `download-results-${index}`,
+                      },
+                  }
+                : {
+                      type: 'section',
+                      text: {
+                          type: 'mrkdwn',
+                          text: '*_This query returned no results_*',
+                      },
+                  },
+        ),
         footerMarkdown
             ? {
                   type: 'context',
@@ -309,3 +449,57 @@ export const getUnfurlBlocks = (
                   }),
     },
 });
+
+export const getNotificationChannelErrorBlocks = (
+    schedulerName: string,
+    error: AnyType,
+    resourceUrl: string,
+    type: 'Scheduled delivery' | 'Google Sync' = 'Scheduled delivery',
+    isDisabled: boolean = false,
+): KnownBlock[] =>
+    getBlocks([
+        {
+            type: 'header',
+            text: {
+                type: 'plain_text',
+                text: `❌ Error sending ${type}: "${schedulerName}"`,
+            },
+        },
+
+        {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: `*Details:*`,
+            },
+            accessory: {
+                type: 'button',
+                text: {
+                    type: 'plain_text',
+                    text: 'Open in Lightdash',
+                    emoji: true,
+                },
+                url: resourceUrl,
+                action_id: 'button-action',
+            },
+        },
+        {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                // eslint-disable-next-line no-useless-concat
+                text: '```' + `${error}` + '```',
+            },
+        },
+        isDisabled
+            ? {
+                  type: 'context',
+                  elements: [
+                      {
+                          type: 'mrkdwn',
+                          text: `Due to this error, this scheduler has been automatically disabled.\nYou can re-enable it from the ${type} settings once the issue is resolved.`,
+                      },
+                  ],
+              }
+            : undefined,
+    ]);

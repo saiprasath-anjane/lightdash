@@ -1,4 +1,5 @@
 import {
+    ApiCreateGroupResponse,
     ApiErrorPayload,
     ApiGroupListResponse,
     ApiGroupResponse,
@@ -10,6 +11,7 @@ import {
     ApiSuccessEmpty,
     CreateGroup,
     CreateOrganization,
+    KnexPaginateArgs,
     OrganizationMemberProfileUpdate,
     UpdateAllowedEmailDomains,
     UpdateOrganization,
@@ -17,7 +19,6 @@ import {
 } from '@lightdash/common';
 import {
     Body,
-    Controller,
     Delete,
     Get,
     Middlewares,
@@ -33,18 +34,17 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
-import { userModel } from '../models/models';
-import { organizationService, userService } from '../services/services';
 import {
     allowApiKeyAuthentication,
     isAuthenticated,
     unauthorisedInDemo,
 } from './authentication';
+import { BaseController } from './baseController';
 
 @Route('/api/v1/org')
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('Organizations')
-export class OrganizationController extends Controller {
+export class OrganizationController extends BaseController {
     /**
      * Get the current user's organization
      * @param req express request
@@ -58,7 +58,9 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.get(req.user!),
+            results: await this.services
+                .getOrganizationService()
+                .get(req.user!),
         };
     }
 
@@ -75,10 +77,12 @@ export class OrganizationController extends Controller {
         @Request() req: express.Request,
         @Body() body: CreateOrganization,
     ): Promise<ApiSuccessEmpty> {
-        await organizationService.createAndJoinOrg(req.user!, body);
-        const sessionUser = await userModel.findSessionUserByUUID(
-            req.user!.userUuid,
-        );
+        await this.services
+            .getOrganizationService()
+            .createAndJoinOrg(req.user!, body);
+        const sessionUser = await req.services
+            .getUserService()
+            .getSessionByUserUuid(req.user!.userUuid);
         await new Promise<void>((resolve, reject) => {
             req.login(sessionUser, (err) => {
                 if (err) {
@@ -106,7 +110,7 @@ export class OrganizationController extends Controller {
         @Request() req: express.Request,
         @Body() body: UpdateOrganization,
     ): Promise<ApiSuccessEmpty> {
-        await organizationService.updateOrg(req.user!, body);
+        await this.services.getOrganizationService().updateOrg(req.user!, body);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -126,7 +130,9 @@ export class OrganizationController extends Controller {
         @Request() req: express.Request,
         @Path() organizationUuid: string,
     ): Promise<ApiSuccessEmpty> {
-        await organizationService.delete(organizationUuid, req.user!);
+        await this.services
+            .getOrganizationService()
+            .delete(organizationUuid, req.user!);
         await new Promise<void>((resolve, reject) => {
             req.session.destroy((err) => {
                 if (err) {
@@ -155,13 +161,16 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.getProjects(req.user!),
+            results: await this.services
+                .getOrganizationService()
+                .getProjects(req.user!),
         };
     }
 
     /**
      * Gets all the members of the current user's organization
      * @param req express request
+     * @param projectUuid filter users who can view this project
      */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @Get('/users')
@@ -169,14 +178,32 @@ export class OrganizationController extends Controller {
     async getOrganizationMembers(
         @Request() req: express.Request,
         @Query() includeGroups?: number,
+        @Query() pageSize?: number,
+        @Query() page?: number,
+        @Query() searchQuery?: string,
+        @Query() projectUuid?: string,
     ): Promise<ApiOrganizationMemberProfiles> {
         this.setStatus(200);
+        let paginateArgs: KnexPaginateArgs | undefined;
+
+        if (pageSize && page) {
+            paginateArgs = {
+                page,
+                pageSize,
+            };
+        }
+
         return {
             status: 'ok',
-            results: await organizationService.getUsers(
-                req.user!,
-                includeGroups,
-            ),
+            results: await this.services
+                .getOrganizationService()
+                .getUsers(
+                    req.user!,
+                    includeGroups,
+                    paginateArgs,
+                    searchQuery,
+                    projectUuid,
+                ),
         };
     }
 
@@ -195,10 +222,9 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.getMemberByUuid(
-                req.user!,
-                userUuid,
-            ),
+            results: await this.services
+                .getOrganizationService()
+                .getMemberByUuid(req.user!, userUuid),
         };
     }
 
@@ -224,11 +250,9 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.updateMember(
-                req.user!,
-                userUuid,
-                body,
-            ),
+            results: await this.services
+                .getOrganizationService()
+                .updateMember(req.user!, userUuid, body),
         };
     }
 
@@ -248,7 +272,7 @@ export class OrganizationController extends Controller {
         @Request() req: express.Request,
         @Path() userUuid: string,
     ): Promise<ApiSuccessEmpty> {
-        await userService.delete(req.user!, userUuid);
+        await this.services.getUserService().delete(req.user!, userUuid);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -269,9 +293,9 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.getAllowedEmailDomains(
-                req.user!,
-            ),
+            results: await this.services
+                .getOrganizationService()
+                .getAllowedEmailDomains(req.user!),
         };
     }
 
@@ -290,10 +314,9 @@ export class OrganizationController extends Controller {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await organizationService.updateAllowedEmailDomains(
-                req.user!,
-                body,
-            ),
+            results: await this.services
+                .getOrganizationService()
+                .updateAllowedEmailDomains(req.user!, body),
         };
     }
 
@@ -312,11 +335,10 @@ export class OrganizationController extends Controller {
     async createGroup(
         @Request() req: express.Request,
         @Body() body: CreateGroup,
-    ): Promise<ApiGroupResponse> {
-        const group = await organizationService.addGroupToOrganization(
-            req.user!,
-            body,
-        );
+    ): Promise<ApiCreateGroupResponse> {
+        const group = await this.services
+            .getOrganizationService()
+            .addGroupToOrganization(req.user!, body);
         this.setStatus(201);
         return {
             status: 'ok',
@@ -334,13 +356,31 @@ export class OrganizationController extends Controller {
     @OperationId('ListGroupsInOrganization')
     async listGroupsInOrganization(
         @Request() req: express.Request,
+        @Query() page?: number,
+        @Query() pageSize?: number,
         @Query() includeMembers?: number,
+        @Query() searchQuery?: string,
     ): Promise<ApiGroupListResponse> {
-        const groups = await organizationService.listGroupsInOrganization(
-            req.user!,
-            includeMembers,
-        );
+        let paginateArgs: KnexPaginateArgs | undefined;
+
+        if (pageSize && page) {
+            paginateArgs = {
+                page,
+                pageSize,
+            };
+        }
+
+        const groups = await this.services
+            .getOrganizationService()
+            .listGroupsInOrganization(
+                req.user!,
+                includeMembers,
+                paginateArgs,
+                searchQuery,
+            );
+
         this.setStatus(200);
+
         return {
             status: 'ok',
             results: groups,

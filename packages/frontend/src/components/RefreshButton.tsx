@@ -3,20 +3,24 @@ import {
     Group,
     Kbd,
     MantineProvider,
-    MantineSize,
     Text,
     Tooltip,
+    type MantineSize,
 } from '@mantine/core';
 import { useHotkeys, useOs } from '@mantine/hooks';
 import { IconPlayerPlay } from '@tabler/icons-react';
-import { FC, memo, useCallback } from 'react';
-import { useExplorerContext } from '../providers/ExplorerProvider';
-import { useTracking } from '../providers/TrackingProvider';
+import { memo, useCallback, type FC } from 'react';
+import useHealth from '../hooks/health/useHealth';
+import useExplorerContext from '../providers/Explorer/useExplorerContext';
+import useTracking from '../providers/Tracking/useTracking';
 import { EventName } from '../types/Events';
 import MantineIcon from './common/MantineIcon';
 import LimitButton from './LimitButton';
 
 export const RefreshButton: FC<{ size?: MantineSize }> = memo(({ size }) => {
+    const health = useHealth();
+    const maxLimit = health.data?.query.maxLimit ?? 5000;
+
     const os = useOs();
     const limit = useExplorerContext(
         (context) => context.state.unsavedChartVersion.metricQuery.limit,
@@ -75,7 +79,13 @@ export const RefreshButton: FC<{ size?: MantineSize }> = memo(({ size }) => {
                     leftIcon={<MantineIcon icon={IconPlayerPlay} />}
                     loading={isLoading}
                     onClick={onClick}
-                    sx={{ flex: 1 }}
+                    sx={(theme) => ({
+                        flex: 1,
+                        borderRight: `1px solid ${theme.fn.rgba(
+                            theme.colors.gray[5],
+                            0.6,
+                        )}`,
+                    })}
                 >
                     Run query ({limit})
                 </Button>
@@ -84,6 +94,7 @@ export const RefreshButton: FC<{ size?: MantineSize }> = memo(({ size }) => {
             <LimitButton
                 disabled={!isValidQuery}
                 size={size}
+                maxLimit={maxLimit}
                 limit={limit}
                 onLimitChange={setRowLimit}
             />

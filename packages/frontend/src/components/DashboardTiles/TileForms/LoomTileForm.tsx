@@ -1,13 +1,8 @@
-import { DashboardLoomTileProperties } from '@lightdash/common';
+import { type DashboardLoomTileProperties } from '@lightdash/common';
 import { ActionIcon, Flex, Stack, TextInput } from '@mantine/core';
-import { UseFormReturnType } from '@mantine/form';
+import { type UseFormReturnType } from '@mantine/form';
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import MantineIcon from '../../common/MantineIcon';
-
-export const getLoomId = (value: string | undefined): string | undefined => {
-    const arr = value?.match(/share\/(.*)/);
-    return arr?.[1];
-};
 
 interface LoomTileFormProps {
     form: UseFormReturnType<DashboardLoomTileProperties['properties']>;

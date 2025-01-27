@@ -7,14 +7,14 @@ import {
     Stack,
     TextInput,
 } from '@mantine/core';
-import { FC, useState } from 'react';
+import { useState, type FC } from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 import { useToggle } from 'react-use';
 import { hasNoWhiteSpaces } from '../../../utils/fieldValidators';
 import FormSection from '../../ReactHookForm/FormSection';
 import Input from '../../ReactHookForm/Input';
 import FormCollapseButton from '../FormCollapseButton';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 import StartOfWeekSelect from './Inputs/StartOfWeekSelect';
 
 export const BigQuerySchemaInput: FC<{
@@ -110,6 +110,8 @@ const BigQueryForm: FC<{
                         <FileInput
                             {...field}
                             label="Key File"
+                            // FIXME: until mantine 7.4: https://github.com/mantinedev/mantine/issues/5401#issuecomment-1874906064
+                            // @ts-ignore
                             placeholder={
                                 !requireSecrets
                                     ? '**************'
@@ -157,6 +159,35 @@ const BigQueryForm: FC<{
 
                 <FormSection isOpen={isOpen} name="advanced">
                     <Stack style={{ marginTop: '8px' }}>
+                        <TextInput
+                            label="Execution project"
+                            description={
+                                <p>
+                                    You may specify a project to bill for query
+                                    execution, instead of the project/database
+                                    where you materialize most resources. You
+                                    can see more details in{' '}
+                                    <Anchor
+                                        target="_blank"
+                                        href="https://docs.getdbt.com/docs/core/connect-data-platform/bigquery-setup#execution-project"
+                                        rel="noreferrer"
+                                    >
+                                        dbt documentation
+                                    </Anchor>
+                                    .
+                                </p>
+                            }
+                            {...register('warehouse.executionProject', {
+                                validate: {
+                                    hasNoWhiteSpaces:
+                                        hasNoWhiteSpaces('Execution project'),
+                                },
+                                setValueAs: (value) =>
+                                    value === '' ? undefined : value,
+                            })}
+                            disabled={disabled}
+                        />
+
                         <Controller
                             name="warehouse.timeoutSeconds"
                             defaultValue={300}

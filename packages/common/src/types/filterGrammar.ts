@@ -1,12 +1,14 @@
 import * as peg from 'pegjs';
 import { v4 as uuidv4 } from 'uuid';
+import { type AnyType } from './any';
 import { UnexpectedServerError } from './errors';
-import { FilterOperator, MetricFilterRule } from './filter';
+import { FilterOperator, type MetricFilterRule } from './filter';
 
 export type ParsedFilter = {
     type: string;
-    values: any[];
+    values: AnyType[];
     is?: boolean;
+    date_interval?: string;
 };
 
 const filterGrammar = `ROOT
@@ -15,12 +17,12 @@ EMPTY_STRING = '' {
     return {
       type: '${FilterOperator.EQUALS}',
       values: [],
-      is: true, 
+      is: true,
     }
   }
 
 EXPRESSION
-= NUMERICAL / LIST / TERM  
+= NUMERICAL / DATE_RESTRICTION / LIST / TERM
 
 
 NUMERICAL = SPACE_SYMBOL* operator:OPERATOR SPACE_SYMBOL* value:NUMBER {
@@ -32,7 +34,18 @@ NUMERICAL = SPACE_SYMBOL* operator:OPERATOR SPACE_SYMBOL* value:NUMBER {
 
 OPERATOR = '>=' / '<=' / '>' / '<'
 
-NUMBER 
+DATE_RESTRICTION = SPACE_SYMBOL* operator:DATE_OPERATOR SPACE_SYMBOL* value:NUMBER SPACE_SYMBOL* interval:DATE_INTERVAL {
+    return {
+        type: operator,
+        values: [value],
+        date_interval: interval
+    }
+   }
+
+DATE_OPERATOR = 'inThePast' / 'inTheNext'
+DATE_INTERVAL = 'milliseconds' / 'seconds' / 'minutes' / 'hours' / 'days' / 'weeks' / 'months' / 'years'
+
+NUMBER
   = FLOAT ([Ee] [+-]? INTEGER)?
     { return Number(text()) }
 
@@ -83,7 +96,7 @@ MATCH
     }
 }
 PCT
-=  CONTAINS / STARTS_WITH / ENDS_WITH 
+=  CONTAINS / STARTS_WITH / ENDS_WITH
 CONTAINS
 = PCT_SYMBOL value:(char / UNDERSCORE)+ PCT_SYMBOL !(string / PCT_SYMBOL / UNDERSCORE)  {
   return {
@@ -189,6 +202,10 @@ export const parseOperator = (
             return FilterOperator.LESS_THAN;
         case '<=':
             return FilterOperator.LESS_THAN_OR_EQUAL;
+        case FilterOperator.IN_THE_PAST:
+            return FilterOperator.IN_THE_PAST;
+        case FilterOperator.IN_THE_NEXT:
+            return FilterOperator.IN_THE_NEXT;
         case 'null':
         case 'NULL':
             return isTrue ? FilterOperator.NULL : FilterOperator.NOT_NULL;
@@ -200,7 +217,7 @@ export const parseOperator = (
 };
 
 export const parseFilters = (
-    rawFilters: Record<string, any>[] | undefined,
+    rawFilters: Record<string, AnyType>[] | undefined,
 ): MetricFilterRule[] => {
     if (!rawFilters || rawFilters.length === 0) {
         return [];
@@ -236,6 +253,24 @@ export const parseFilters = (
                         !!parsedFilter.is,
                     ),
                     values: parsedFilter.values || [1],
+                    ...(parsedFilter.date_interval
+                        ? {
+                              settings: {
+                                  unitOfTime: parsedFilter.date_interval,
+                              },
+                          }
+                        : null),
+                },
+            ];
+        }
+        if (typeof value === 'object') {
+            return [
+                ...acc,
+                {
+                    id: uuidv4(),
+                    target: { fieldRef: key },
+                    operator: FilterOperator.EQUALS,
+                    values: value,
                 },
             ];
         }

@@ -1,12 +1,12 @@
 import {
-    DefaultProps,
     Stack,
     Text,
-    TextProps,
     Title,
-    TitleProps,
+    type DefaultProps,
+    type TextProps,
+    type TitleProps,
 } from '@mantine/core';
-import { FC, ReactNode } from 'react';
+import { type FC, type ReactNode } from 'react';
 
 type EmptyStateProps = DefaultProps & {
     icon?: ReactNode;
@@ -16,7 +16,7 @@ type EmptyStateProps = DefaultProps & {
     descriptionProps?: TextProps;
 };
 
-export const EmptyState: FC<EmptyStateProps> = ({
+export const EmptyState: FC<React.PropsWithChildren<EmptyStateProps>> = ({
     icon,
     title,
     titleProps,

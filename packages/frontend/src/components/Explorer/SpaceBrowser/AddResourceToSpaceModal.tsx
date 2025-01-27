@@ -1,31 +1,43 @@
-import { assertUnreachable } from '@lightdash/common';
+import { subject } from '@casl/ability';
+import {
+    assertUnreachable,
+    ContentType,
+    type SummaryContent,
+} from '@lightdash/common';
 import {
     Button,
     Group,
+    Loader,
     Modal,
-    ModalProps,
     MultiSelect,
+    ScrollArea,
     Stack,
     Text,
     Title,
+    type ModalProps,
+    type ScrollAreaProps,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
+import { useDebouncedValue } from '@mantine/hooks';
 import { IconFolder } from '@tabler/icons-react';
-import { FC, forwardRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import {
-    useDashboards,
-    useUpdateMultipleDashboard,
-} from '../../../hooks/dashboard/useDashboards';
-import { useChartSummaries } from '../../../hooks/useChartSummaries';
+import { uniqBy } from 'lodash';
+import React, {
+    forwardRef,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type FC,
+} from 'react';
+import { useParams } from 'react-router';
+import { useUpdateMultipleDashboard } from '../../../hooks/dashboard/useDashboards';
+import { useInfiniteContent } from '../../../hooks/useContent';
 import { useUpdateMultipleMutation } from '../../../hooks/useSavedQuery';
 import { useSpace, useSpaceSummaries } from '../../../hooks/useSpaces';
+import useApp from '../../../providers/App/useApp';
 import MantineIcon from '../../common/MantineIcon';
-
-export enum AddToSpaceResources {
-    DASHBOARD = 'dashboard',
-    CHART = 'chart',
-}
+import { AddToSpaceResources } from './types';
 
 const getResourceTypeLabel = (resourceType: AddToSpaceResources) => {
     switch (resourceType) {
@@ -86,16 +98,71 @@ const AddResourceToSpaceModal: FC<Props> = ({ resourceType, onClose }) => {
         projectUuid: string;
         spaceUuid: string;
     }>();
-
+    const { user } = useApp();
     const { data: space } = useSpace(projectUuid, spaceUuid);
     const { data: spaces } = useSpaceSummaries(projectUuid);
+    const [searchQuery, setSearchQuery] = useState<string>('');
+    const [debouncedSearchQuery] = useDebouncedValue(searchQuery, 300);
+    const selectScrollRef = useRef<HTMLDivElement>(null);
+    const {
+        data: contentPages,
+        isInitialLoading,
+        isFetching,
+        hasNextPage,
+        fetchNextPage,
+    } = useInfiniteContent(
+        {
+            projectUuids: [projectUuid!],
+            contentTypes:
+                resourceType === AddToSpaceResources.CHART
+                    ? [ContentType.CHART]
+                    : [ContentType.DASHBOARD],
+            page: 1,
+            pageSize: 25,
+            search: debouncedSearchQuery,
+        },
+        { keepPreviousData: true },
+    );
+    useEffect(() => {
+        selectScrollRef.current?.scrollTo({
+            top: selectScrollRef.current?.scrollHeight,
+        });
+    }, [contentPages]);
+    // Aggregates all fetched charts/dashboards across pages and search queries into a unified list.
+    // This ensures that previously fetched charts/dashboards are preserved even when the search query changes.
+    // Uses 'uuid' to remove duplicates and maintain a consistent set of unique charts/dashboards.
+    const [allItems, setAllItems] = useState<SummaryContent[]>([]);
+    useEffect(() => {
+        const allPages = contentPages?.pages.map((p) => p.data).flat() ?? [];
+        const itemsWithUpdatePermission = allPages.filter((summary) => {
+            const summarySpace = spaces?.find(
+                ({ uuid }) => uuid === summary.space.uuid,
+            );
+            return user.data?.ability.can(
+                'update',
+                subject(
+                    resourceType === AddToSpaceResources.CHART
+                        ? 'SavedChart'
+                        : 'Dashboard',
+                    {
+                        ...summarySpace,
+                        access: summarySpace?.userAccess
+                            ? [summarySpace?.userAccess]
+                            : [],
+                    },
+                ),
+            );
+        });
 
-    const { data: savedCharts, isLoading } = useChartSummaries(projectUuid);
-    const { data: dashboards } = useDashboards(projectUuid);
+        setAllItems((previousState) =>
+            uniqBy([...previousState, ...itemsWithUpdatePermission], 'uuid'),
+        );
+    }, [contentPages?.pages, user.data, spaces, resourceType]);
 
-    const { mutate: chartMutation } = useUpdateMultipleMutation(projectUuid);
-    const { mutate: dashboardMutation } =
-        useUpdateMultipleDashboard(projectUuid);
+    const { mutate: chartMutation } = useUpdateMultipleMutation(projectUuid!);
+    const { mutate: dashboardMutation } = useUpdateMultipleDashboard(
+        projectUuid!,
+    );
 
     const form = useForm<AddItemForm>();
     const { reset } = form;
@@ -105,40 +172,36 @@ const AddResourceToSpaceModal: FC<Props> = ({ resourceType, onClose }) => {
         if (onClose) onClose();
     }, [reset, onClose]);
 
-    const allItems =
-        resourceType === AddToSpaceResources.CHART ? savedCharts : dashboards;
-
-    if (!allItems) {
-        return null;
-    }
-
-    const selectItems: SelectItemData[] = allItems.map(
-        ({ uuid: itemUuid, name, spaceUuid: itemSpaceUuid }) => {
-            const disabled = spaceUuid === itemSpaceUuid;
-            const spaceName = spaces?.find(
-                (sp) => sp.uuid === itemSpaceUuid,
-            )?.name;
-
-            return {
-                value: itemUuid,
-                label: name,
-                disabled,
-                title: disabled
-                    ? `${getResourceTypeLabel(
-                          resourceType,
-                      )} already added on this space ${spaceName}`
-                    : '',
-                spaceName,
-            };
-        },
-    );
+    const selectItems: SelectItemData[] = useMemo(() => {
+        return allItems.map<SelectItemData>(
+            ({
+                uuid: itemUuid,
+                name,
+                space: { uuid: itemSpaceUuid, name: itemSpaceName },
+            }) => {
+                const disabled = spaceUuid === itemSpaceUuid;
+                return {
+                    value: itemUuid,
+                    label: name,
+                    disabled,
+                    title: disabled
+                        ? `${getResourceTypeLabel(
+                              resourceType,
+                          )} already added on this space ${itemSpaceName}`
+                        : '',
+                    spaceName: itemSpaceName,
+                };
+            },
+        );
+    }, [spaceUuid, allItems, resourceType]);
 
     const handleSubmit = form.onSubmit(({ items }) => {
+        if (!spaceUuid) return;
         switch (resourceType) {
             case AddToSpaceResources.CHART:
-                if (savedCharts && items) {
+                if (items) {
                     const selectedCharts = items.map((item) => {
-                        const chart = savedCharts.find(
+                        const chart = allItems.find(
                             (savedChart) => savedChart.uuid === item,
                         );
                         return {
@@ -152,9 +215,9 @@ const AddResourceToSpaceModal: FC<Props> = ({ resourceType, onClose }) => {
                 }
                 break;
             case AddToSpaceResources.DASHBOARD:
-                if (dashboards && items) {
+                if (items) {
                     const selectedDashboards = items.map((item) => {
-                        const dashboard = dashboards.find(
+                        const dashboard = allItems.find(
                             ({ uuid }) => uuid === item,
                         );
                         return {
@@ -195,8 +258,38 @@ const AddResourceToSpaceModal: FC<Props> = ({ resourceType, onClose }) => {
                         required
                         data={selectItems}
                         itemComponent={SelectItem}
-                        disabled={isLoading}
+                        disabled={isInitialLoading}
                         placeholder={`Search for a ${resourceType}`}
+                        nothingFound={`No ${resourceType}s found`}
+                        clearable
+                        searchValue={searchQuery}
+                        onSearchChange={setSearchQuery}
+                        maxDropdownHeight={300}
+                        rightSection={
+                            isFetching && <Loader size="xs" color="gray" />
+                        }
+                        dropdownComponent={({
+                            children,
+                            ...rest
+                        }: ScrollAreaProps) => (
+                            <ScrollArea {...rest} viewportRef={selectScrollRef}>
+                                <>
+                                    {children}
+                                    {hasNextPage && (
+                                        <Button
+                                            size="xs"
+                                            variant="white"
+                                            onClick={async () => {
+                                                await fetchNextPage();
+                                            }}
+                                            disabled={isFetching}
+                                        >
+                                            <Text>Load more</Text>
+                                        </Button>
+                                    )}
+                                </>
+                            </ScrollArea>
+                        )}
                         {...form.getInputProps('items')}
                     />
                 </Stack>
@@ -206,7 +299,7 @@ const AddResourceToSpaceModal: FC<Props> = ({ resourceType, onClose }) => {
                         Cancel
                     </Button>
                     <Button
-                        disabled={isLoading}
+                        disabled={isInitialLoading}
                         type="submit"
                     >{`Move ${resourceType}s`}</Button>
                 </Group>

@@ -1,39 +1,13 @@
 import {
     ChartType,
-    CustomDimension,
-    Dimension,
     getDimensionsFromItemsMap,
     getMetricsFromItemsMap,
+    getTableCalculationsFromItemsMap,
     isNumericItem,
-    ItemsMap,
-    Metric,
 } from '@lightdash/common';
-import { FC, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, type FC } from 'react';
 import usePieChartConfig from '../../hooks/usePieChartConfig';
-import {
-    VisualizationConfig,
-    VisualizationConfigCommon,
-} from './VisualizationProvider';
-
-export type VisualizationConfigPie = {
-    chartType: ChartType.PIE;
-    chartConfig: ReturnType<typeof usePieChartConfig>;
-    dimensions: Record<string, CustomDimension | Dimension>;
-    numericMetrics: Record<string, Metric>;
-};
-
-export const isPieVisualizationConfig = (
-    visualizationConfig: VisualizationConfig | undefined,
-): visualizationConfig is VisualizationConfigPie => {
-    return visualizationConfig?.chartType === ChartType.PIE;
-};
-
-type VisualizationConfigPieProps =
-    VisualizationConfigCommon<VisualizationConfigPie> & {
-        // TODO: shared prop once all visualizations are converted
-        itemsMap: ItemsMap | undefined;
-        colorPalette: string[];
-    };
+import { type VisualizationConfigPieProps } from './types';
 
 const VisualizationPieConfig: FC<VisualizationConfigPieProps> = ({
     resultsData,
@@ -42,17 +16,16 @@ const VisualizationPieConfig: FC<VisualizationConfigPieProps> = ({
     itemsMap,
     colorPalette,
     children,
+    tableCalculationsMetadata,
 }) => {
-    const { dimensions, numericMetrics } = useMemo(
-        () => ({
+    const { dimensions, numericMetrics } = useMemo(() => {
+        const metrics = getMetricsFromItemsMap(itemsMap ?? {}, isNumericItem);
+        const tableCalculations = getTableCalculationsFromItemsMap(itemsMap);
+        return {
             dimensions: getDimensionsFromItemsMap(itemsMap ?? {}),
-            numericMetrics: getMetricsFromItemsMap(
-                itemsMap ?? {},
-                isNumericItem,
-            ),
-        }),
-        [itemsMap],
-    );
+            numericMetrics: { ...metrics, ...tableCalculations },
+        };
+    }, [itemsMap]);
 
     const pieChartConfig = usePieChartConfig(
         resultsData,
@@ -61,6 +34,7 @@ const VisualizationPieConfig: FC<VisualizationConfigPieProps> = ({
         dimensions,
         numericMetrics,
         colorPalette,
+        tableCalculationsMetadata,
     );
 
     useEffect(() => {

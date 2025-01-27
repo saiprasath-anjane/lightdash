@@ -1,30 +1,34 @@
 import {
-    ResourceViewItem,
     ResourceViewItemType,
     wrapResourceView,
+    type ResourceViewItem,
 } from '@lightdash/common';
 import { ActionIcon, Group, Stack, TextInput } from '@mantine/core';
 import { IconLayoutDashboard, IconSearch, IconX } from '@tabler/icons-react';
 import Fuse from 'fuse.js';
-import { FC, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useMemo, useState, type FC } from 'react';
+import { useParams } from 'react-router';
 import ErrorState from '../components/common/ErrorState';
 import LoadingState from '../components/common/LoadingState';
 import MantineIcon from '../components/common/MantineIcon';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import ResourceView from '../components/common/ResourceView';
-import { SortDirection } from '../components/common/ResourceView/ResourceViewList';
+import { ResourceSortDirection } from '../components/common/ResourceView/types';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import ForbiddenPanel from '../components/ForbiddenPanel';
 import { useSpace } from '../hooks/useSpaces';
-import { useApp } from '../providers/AppProvider';
+import useApp from '../providers/App/useApp';
 
 const MobileSpace: FC = () => {
     const { projectUuid, spaceUuid } = useParams<{
         projectUuid: string;
         spaceUuid: string;
     }>();
-    const { data: space, isLoading, error } = useSpace(projectUuid, spaceUuid);
+    const {
+        data: space,
+        isInitialLoading,
+        error,
+    } = useSpace(projectUuid, spaceUuid);
     const { user } = useApp();
     const [search, setSearch] = useState<string>('');
     const visibleItems = useMemo(() => {
@@ -55,7 +59,7 @@ const MobileSpace: FC = () => {
         return <ForbiddenPanel />;
     }
 
-    if (isLoading) {
+    if (isInitialLoading) {
         return <LoadingState title="Loading space" />;
     }
 
@@ -106,7 +110,7 @@ const MobileSpace: FC = () => {
             <ResourceView
                 items={visibleItems}
                 listProps={{
-                    defaultSort: { updatedAt: SortDirection.DESC },
+                    defaultSort: { updatedAt: ResourceSortDirection.DESC },
                     defaultColumnVisibility: {
                         space: false,
                         updatedAt: false,

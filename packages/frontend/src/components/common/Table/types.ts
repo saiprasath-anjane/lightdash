@@ -1,18 +1,21 @@
 import {
-    CustomDimension,
-    Field,
-    PivotReference,
-    ResultRow,
-    SortField,
-    TableCalculation,
+    type ConditionalFormattingConfig,
+    type CustomDimension,
+    type Field,
+    type PivotReference,
+    type ResultRow,
+    type SortField,
+    type TableCalculation,
 } from '@lightdash/common';
 import {
-    Cell,
-    ColumnDef,
     createColumnHelper,
-    Header,
+    type Cell,
+    type ColumnDef,
+    type Header,
+    type Table,
 } from '@tanstack/react-table';
-import { CSSProperties } from 'styled-components';
+import { type FC } from 'react';
+import { type CSSProperties } from 'styled-components';
 
 export type HeaderProps = { header: Header<ResultRow, any> };
 export type CellContextMenuProps = {
@@ -46,7 +49,27 @@ export type TableColumn = ColumnDef<ResultRow, ResultRow[0]> & {
 
 export const columnHelper = createColumnHelper<ResultRow>();
 
-export const DEFAULT_PAGE_SIZE = 10;
-export const MAX_PAGE_SIZE = 5000;
+export type ProviderProps = {
+    data: ResultRow[];
+    columns: Array<TableColumn | TableHeader>;
+    headerContextMenu?: FC<React.PropsWithChildren<HeaderProps>>;
+    cellContextMenu?: FC<React.PropsWithChildren<CellContextMenuProps>>;
+    pagination?: {
+        show?: boolean;
+        defaultScroll?: boolean;
+        showResultsTotal?: boolean;
+    };
+    showSubtotals?: boolean;
+    hideRowNumbers?: boolean;
+    showColumnCalculation?: boolean;
+    conditionalFormattings?: ConditionalFormattingConfig[];
+    footer?: {
+        show?: boolean;
+    };
+    columnOrder?: string[];
+    onColumnOrderChange?: (value: string[]) => void;
+};
 
-export const ROW_NUMBER_COLUMN_ID = 'row_number_column';
+export type TableContext = ProviderProps & {
+    table: Table<ResultRow>;
+};

@@ -1,12 +1,12 @@
 import { WarehouseTypes } from '@lightdash/common';
 import { Anchor, PasswordInput, Stack, TextInput } from '@mantine/core';
-import React, { FC } from 'react';
+import React, { type FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useToggle } from 'react-use';
 import { hasNoWhiteSpaces } from '../../../utils/fieldValidators';
 import FormSection from '../../ReactHookForm/FormSection';
 import FormCollapseButton from '../FormCollapseButton';
-import { useProjectFormContext } from '../ProjectFormProvider';
+import { useProjectFormContext } from '../useProjectFormContext';
 import StartOfWeekSelect from './Inputs/StartOfWeekSelect';
 
 export const DatabricksSchemaInput: FC<{

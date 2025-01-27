@@ -1,10 +1,10 @@
-import { ApiQueryResults, Field } from '@lightdash/common';
+import { type ApiQueryResults, type Field } from '@lightdash/common';
 import { Box } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
-import React, { FC } from 'react';
-import { useSqlQueryMutation } from '../../hooks/useSqlQuery';
+import React, { type FC } from 'react';
+import { type useSqlQueryMutation } from '../../hooks/useSqlQuery';
 import useSqlRunnerColumns from '../../hooks/useSqlRunnerColumns';
-import { TrackSection } from '../../providers/TrackingProvider';
+import { TrackSection } from '../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../types/Events';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
 import Table from '../common/Table';

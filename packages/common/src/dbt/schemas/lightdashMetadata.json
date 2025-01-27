@@ -1,5 +1,22 @@
 {
     "definitions": {
+        "RequiredAttributes": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+                "oneOf": [
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "type": "string"
+                    }
+                ]
+            }
+        },
         "Compact": {
             "type": "string",
             "enum": [
@@ -15,7 +32,17 @@
         },
         "Format": {
             "type": "string",
-            "enum": ["km", "mi", "usd", "gbp", "eur", "id", "percent"]
+            "enum": [
+                "km",
+                "mi",
+                "usd",
+                "gbp",
+                "eur",
+                "jpy",
+                "dkk",
+                "id",
+                "percent"
+            ]
         },
         "Urls": {
             "type": "array",
@@ -30,6 +57,19 @@
                     }
                 }
             }
+        },
+        "Tags": {
+            "oneOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            ]
         },
         "LightdashDimension": {
             "type": "object",
@@ -89,9 +129,11 @@
                 "urls": {
                     "$ref": "#/definitions/Urls"
                 },
+                "tags": {
+                    "$ref": "#/definitions/Tags"
+                },
                 "required_attributes": {
-                    "type": "object",
-                    "properties": {}
+                    "$ref": "#/definitions/RequiredAttributes"
                 }
             }
         },
@@ -130,9 +172,11 @@
                 "urls": {
                     "$ref": "#/definitions/Urls"
                 },
+                "tags": {
+                    "$ref": "#/definitions/Tags"
+                },
                 "required_attributes": {
-                    "type": "object",
-                    "properties": {}
+                    "$ref": "#/definitions/RequiredAttributes"
                 }
             }
         },
@@ -198,6 +242,9 @@
                 },
                 "percentile": {
                     "type": "number"
+                },
+                "tags": {
+                    "$ref": "#/definitions/Tags"
                 }
             }
         },
@@ -243,6 +290,9 @@
                             "type": {
                                 "type": "string",
                                 "enum": ["inner", "left", "right", "full"]
+                            },
+                            "always": {
+                                "type": "boolean"
                             }
                         }
                     }
@@ -256,6 +306,9 @@
                 },
                 "sql_filter": {
                     "type": "string"
+                },
+                "required_attributes": {
+                    "$ref": "#/definitions/RequiredAttributes"
                 }
             },
             "default": {}

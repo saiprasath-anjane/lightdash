@@ -1,10 +1,13 @@
 import { subject } from '@casl/ability';
 import { Button } from '@mantine/core';
 import { IconTelescope } from '@tabler/icons-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router';
+import useDashboardStorage from '../../hooks/dashboard/useDashboardStorage';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
-import { useApp } from '../../providers/AppProvider';
-import { useExplorerContext } from '../../providers/ExplorerProvider';
+import { useCreateShareMutation } from '../../hooks/useShare';
+import useApp from '../../providers/App/useApp';
+import useExplorerContext from '../../providers/Explorer/useExplorerContext';
 import MantineIcon from '../common/MantineIcon';
 
 const ExploreFromHereButton = () => {
@@ -13,16 +16,33 @@ const ExploreFromHereButton = () => {
     );
     const exploreFromHereUrl = useMemo(() => {
         if (savedChart) {
-            const { pathname, search } =
-                getExplorerUrlFromCreateSavedChartVersion(
-                    savedChart.projectUuid,
-                    savedChart,
-                );
-            return `${pathname}?${search}`;
+            return getExplorerUrlFromCreateSavedChartVersion(
+                savedChart.projectUuid,
+                savedChart,
+                true,
+            );
         }
     }, [savedChart]);
 
     const { user } = useApp();
+    const navigate = useNavigate();
+    const { mutateAsync: createShareUrl } = useCreateShareMutation();
+    const { clearDashboardStorage } = useDashboardStorage();
+
+    const handleCreateShareUrl = useCallback(async () => {
+        if (!exploreFromHereUrl) return;
+
+        const shareUrl = await createShareUrl({
+            path: exploreFromHereUrl.pathname,
+            params: `?` + exploreFromHereUrl.search,
+        });
+
+        // Clear dashboard storage to prevent banner from showing when `exploring from here` on a chart from a dashboard
+        clearDashboardStorage();
+
+        void navigate(`/share/${shareUrl.nanoid}`);
+    }, [clearDashboardStorage, createShareUrl, exploreFromHereUrl, navigate]);
+
     const cannotManageExplore = user.data?.ability.cannot(
         'manage',
         subject('Explore', {
@@ -35,10 +55,9 @@ const ExploreFromHereButton = () => {
 
     return (
         <Button
-            component="a"
             size="xs"
             leftIcon={<MantineIcon icon={IconTelescope} />}
-            href={exploreFromHereUrl}
+            onClick={() => handleCreateShareUrl()}
         >
             Explore from here
         </Button>
